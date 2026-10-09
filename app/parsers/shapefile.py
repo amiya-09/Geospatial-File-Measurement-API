@@ -3,6 +3,7 @@
 import codecs
 import datetime
 import io
+import math
 import re
 import struct
 import zipfile
@@ -164,10 +165,13 @@ def _read_features(
         for index, shape_record in enumerate(reader.iterShapeRecords()):
             if index >= max_features:  # the header count can lie
                 raise ParseError(f"file has more than {max_features} features")
-            budget.take(len(getattr(shape_record.shape, "points", ())))
+            raw_points = getattr(shape_record.shape, "points", ())
+            budget.take(len(raw_points))
             geometry = None
             if shape_record.shape.shapeType == shapefile.NULL:
                 warnings.append(f"feature {index}: null shape; no geometry")
+            elif not all(math.isfinite(c) for point in raw_points for c in point):
+                warnings.append(f"feature {index}: non-finite (NaN/inf) coordinate; no geometry")
             else:
                 try:
                     geometry = shape(shape_record.shape.__geo_interface__)

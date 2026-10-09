@@ -211,3 +211,36 @@ def test_truncated_shp_is_rejected():
     parts["shp"] = parts["shp"][:110]
     with pytest.raises(ParseError):
         parse(parts)
+
+
+# ---- non-finite coordinates ----
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_point_coordinates_make_that_feature_geometry_none_with_a_warning(bad):
+    parsed = parse(points([(1, 1), (bad, 2), (3, 3)]))
+    assert [f.index for f in parsed.features] == [0, 1, 2]
+    assert parsed.features[1].geometry is None
+    assert parsed.features[1].properties == {"name": "p1"}
+    assert parsed.features[0].geometry.x == 1 and parsed.features[2].geometry.x == 3
+    assert len(parsed.warnings) == 1 and "feature 1" in parsed.warnings[0]
+
+
+def test_non_finite_vertex_inside_a_polygon_drops_the_whole_geometry():
+    def build(w):
+        w.poly([[(0, 0), (0, 1), (float("inf"), 1), (1, 0), (0, 0)]])
+        w.record("bad")
+        w.poly([[(5, 5), (5, 6), (6, 6), (6, 5), (5, 5)]])
+        w.record("good")
+
+    parsed = parse(shapefile_parts(build, shapefile.POLYGON))
+    assert parsed.features[0].geometry is None
+    assert parsed.features[1].geometry.area == pytest.approx(1)
+    assert "feature 0" in parsed.warnings[0]
+
+
+def test_non_finite_z_does_not_matter_because_z_is_dropped_later():
+    parts = shapefile_parts(
+        lambda w: (w.pointz(3, 4, float("nan")), w.record("z")), shapefile.POINTZ
+    )
+    assert parse(parts).features[0].geometry is not None

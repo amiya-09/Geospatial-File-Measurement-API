@@ -174,6 +174,14 @@ def test_placemark_without_geometry_is_kept_with_a_warning():
         "<Point><coordinates>10</coordinates></Point>",
         "<Point><coordinates></coordinates></Point>",
         "<Point><coordinates>nan,1</coordinates></Point>",
+        "<Point><coordinates>1,NaN</coordinates></Point>",
+        "<Point><coordinates>inf,1</coordinates></Point>",
+        "<Point><coordinates>1,-inf</coordinates></Point>",
+        "<Point><coordinates>1e999,1</coordinates></Point>",
+        "<Point><coordinates>1,1,nan</coordinates></Point>",
+        "<LineString><coordinates>0,0 1,inf</coordinates></LineString>",
+        "<MultiGeometry><Point><coordinates>0,0</coordinates></Point>"
+        "<Point><coordinates>nan,0</coordinates></Point></MultiGeometry>",
         "<LineString><coordinates>0,0</coordinates></LineString>",
         "<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 1,1</coordinates>"
         "</LinearRing></outerBoundaryIs></Polygon>",
