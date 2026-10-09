@@ -1,0 +1,58 @@
+"""Generated test files. Nothing binary is checked in."""
+
+import io
+import zipfile
+from collections.abc import Callable
+
+import shapefile
+
+
+def shapefile_parts(
+    build: Callable[[shapefile.Writer], None],
+    shape_type: int,
+    fields: tuple[tuple[str, str, int, int], ...] = (("name", "C", 40, 0),),
+    encoding: str = "utf-8",
+) -> dict[str, bytes]:
+    """Write a shapefile with pyshp into memory; returns {"shp": ..., "shx": ..., "dbf": ...}."""
+    shp, shx, dbf = io.BytesIO(), io.BytesIO(), io.BytesIO()
+    writer = shapefile.Writer(shp=shp, shx=shx, dbf=dbf, shapeType=shape_type, encoding=encoding)
+    for name, kind, size, decimal in fields:
+        writer.field(name, kind, size, decimal)
+    build(writer)
+    writer.close()
+    return {"shp": shp.getvalue(), "shx": shx.getvalue(), "dbf": dbf.getvalue()}
+
+
+def make_zip(entries: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def shapefile_zip(
+    parts: dict[str, bytes],
+    stem: str = "data",
+    prj: str | None = None,
+    cpg: str | None = None,
+    extra: dict[str, bytes] | None = None,
+) -> bytes:
+    entries = {f"{stem}.{ext}": data for ext, data in parts.items()}
+    if prj is not None:
+        entries[f"{stem}.prj"] = prj.encode()
+    if cpg is not None:
+        entries[f"{stem}.cpg"] = cpg.encode()
+    entries.update(extra or {})
+    return make_zip(entries)
+
+
+def mark_entries_encrypted(zip_bytes: bytes) -> bytes:
+    """Set the 'encrypted' general-purpose flag on every entry (local and central headers)."""
+    data = bytearray(zip_bytes)
+    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        pos = data.find(signature)
+        while pos != -1:
+            data[pos + flag_offset] |= 0x01
+            pos = data.find(signature, pos + 4)
+    return bytes(data)
