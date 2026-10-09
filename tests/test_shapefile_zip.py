@@ -1,9 +1,18 @@
+import io
+import zipfile
+
 import pytest
 import shapefile
 
 from app.parsers.base import ParseError
 from app.parsers.shapefile import read_zip_members
-from tests.fixtures import make_zip, mark_entries_encrypted, shapefile_parts, shapefile_zip
+from tests.fixtures import (
+    forge_uncompressed_size,
+    make_zip,
+    mark_entries_encrypted,
+    shapefile_parts,
+    shapefile_zip,
+)
 
 
 @pytest.fixture(scope="module")
@@ -148,3 +157,40 @@ def test_encrypted_entries_are_rejected(parts):
 def test_zip_with_no_shapefile_is_rejected():
     with pytest.raises(ParseError, match="shp"):
         read_zip_members(make_zip({"doc.kml": b"<kml/>", "notes.txt": b"hi"}))
+
+
+def test_forged_small_declared_size_cannot_smuggle_a_large_entry(parts):
+    # Header claims 100 bytes; the deflate stream really holds 5 MB. The declared-size
+    # pre-check passes (100 < cap), so only reading can catch it.
+    honest = shapefile_zip(parts, extra={"zeros.bin": b"\x00" * 5_000_000})
+    forged = forge_uncompressed_size(honest, 100)
+    declared = sum(i.file_size for i in zipfile.ZipFile(io.BytesIO(forged)).infolist())
+    assert declared < 1_000_000  # the pre-check really is fooled
+    with pytest.raises(ParseError):
+        read_zip_members(forged, max_uncompressed=1_000_000)
+
+
+def test_zip_bound_is_enforced_on_bytes_actually_read_not_on_the_header(parts, monkeypatch):
+    # Simulate a decompressor that ignores the header and keeps producing data, so the
+    # result cannot depend on zipfile's own size handling.
+    zipped = shapefile_zip(parts)  # built before patching: writestr also goes through open()
+    requested = []
+
+    class Endless(io.BytesIO):
+        def read(self, size=-1):
+            requested.append(size)
+            return super().read(size)
+
+    real_open = zipfile.ZipFile.open
+
+    def fake_open(self, info, *args, **kwargs):
+        if info.filename.endswith(".shp"):
+            return Endless(b"\x00" * 5_000_000)
+        return real_open(self, info, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", fake_open)
+    cap = 1_000_000
+    with pytest.raises(ParseError, match="uncompressed"):
+        read_zip_members(zipped, max_uncompressed=cap)
+    # every read was explicitly bounded by the remaining budget (never size=-1 / unbounded)
+    assert requested and all(0 < n <= cap + 1 for n in requested)

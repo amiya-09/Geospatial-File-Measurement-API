@@ -56,3 +56,14 @@ def mark_entries_encrypted(zip_bytes: bytes) -> bytes:
             data[pos + flag_offset] |= 0x01
             pos = data.find(signature, pos + 4)
     return bytes(data)
+
+
+def forge_uncompressed_size(zip_bytes: bytes, declared: int) -> bytes:
+    """Overwrite the declared uncompressed size in every local and central header."""
+    data = bytearray(zip_bytes)
+    for signature, offset in ((b"PK\x03\x04", 22), (b"PK\x01\x02", 24)):
+        pos = data.find(signature)
+        while pos != -1:
+            data[pos + offset : pos + offset + 4] = declared.to_bytes(4, "little")
+            pos = data.find(signature, pos + 4)
+    return bytes(data)
