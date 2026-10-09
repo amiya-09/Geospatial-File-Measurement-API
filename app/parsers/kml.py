@@ -1,12 +1,40 @@
-"""KML parser. Placemarks become features; coordinates are always WGS84 (lon, lat)."""
+"""KML parser. Placemarks become features; coordinates are always WGS84 (lon, lat).
+
+Problems with one Placemark's geometry (bad coordinates, missing or unsupported geometry)
+keep the feature with ``geometry=None`` and add a warning, so indexes stay stable. Problems
+with the file as a whole raise ParseError.
+"""
+
+import math
+import re
+from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as safe_et
 from defusedxml import DefusedXmlException
 from pyproj import CRS
+from shapely.errors import ShapelyError
+from shapely.geometry import (
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPoint,
+    MultiPolygon,
+    Point,
+    Polygon,
+)
+from shapely.geometry.base import BaseGeometry
 
-from app.parsers.base import ParsedFile, ParseError
+from app.parsers.base import Feature, ParsedFile, ParseError
 
 WGS84 = CRS.from_epsg(4326)
+
+_GEOMETRY_TAGS = {"Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"}
+_UNSUPPORTED_TAGS = {"Track", "MultiTrack", "Model"}
+_COMMA_SPACES = re.compile(r"\s*,\s*")
+
+
+class _GeometryError(ValueError):
+    """One Placemark's geometry is unusable."""
 
 
 def _local(tag: str) -> str:
@@ -14,13 +42,145 @@ def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def _children(el: Element, name: str) -> list[Element]:
+    return [c for c in el if _local(c.tag) == name]
+
+
+def _text(el: Element | None) -> str | None:
+    if el is None or el.text is None:
+        return None
+    return el.text.strip() or None
+
+
+def _coordinates(el: Element) -> list[tuple[float, float]]:
+    """Parse a geometry's <coordinates>: whitespace-separated lon,lat[,alt]; altitude dropped."""
+    nodes = _children(el, "coordinates")
+    if not nodes:
+        raise _GeometryError("missing <coordinates>")
+    points = []
+    for token in _COMMA_SPACES.sub(",", nodes[0].text or "").split():
+        parts = token.split(",")
+        if len(parts) not in (2, 3):
+            raise _GeometryError(f"bad coordinate {token!r}")
+        try:
+            values = [float(p) for p in parts]
+        except ValueError:
+            raise _GeometryError(f"bad coordinate {token!r}") from None
+        if not all(math.isfinite(v) for v in values):
+            raise _GeometryError(f"non-finite coordinate {token!r}")
+        points.append((values[0], values[1]))
+    if not points:
+        raise _GeometryError("empty <coordinates>")
+    return points
+
+
+def _ring(boundary: Element) -> list[tuple[float, float]]:
+    rings = _children(boundary, "LinearRing")
+    if not rings:
+        raise _GeometryError("boundary has no <LinearRing>")
+    return _coordinates(rings[0])
+
+
+def _simple_geometries(el: Element) -> list[BaseGeometry]:
+    """Geometries for one geometry element; MultiGeometry is flattened recursively."""
+    kind = _local(el.tag)
+    try:
+        if kind == "Point":
+            points = _coordinates(el)
+            if len(points) != 1:
+                raise _GeometryError("<Point> must have exactly one coordinate")
+            return [Point(points[0])]
+        if kind in ("LineString", "LinearRing"):
+            return [LineString(_coordinates(el))]
+        if kind == "Polygon":
+            outer = _children(el, "outerBoundaryIs")
+            if not outer:
+                raise _GeometryError("<Polygon> has no <outerBoundaryIs>")
+            holes = [_ring(b) for b in _children(el, "innerBoundaryIs")]
+            return [Polygon(_ring(outer[0]), holes)]
+    except _GeometryError:
+        raise
+    except (ValueError, ShapelyError) as exc:  # shapely: too few points, etc.
+        raise _GeometryError(str(exc)) from exc
+    if kind == "MultiGeometry":
+        parts = []
+        for child in el:
+            if _local(child.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS:
+                parts.extend(_simple_geometries(child))
+        if not parts:
+            raise _GeometryError("empty <MultiGeometry>")
+        return parts
+    raise _GeometryError(f"unsupported geometry <{kind}>")
+
+
+def _combine(parts: list[BaseGeometry]) -> BaseGeometry:
+    """Single part stays itself; same-type parts become Multi*; otherwise a collection."""
+    if len(parts) == 1:
+        return parts[0]
+    types = {p.geom_type for p in parts}
+    if types == {"Point"}:
+        return MultiPoint(parts)
+    if types == {"LineString"}:
+        return MultiLineString(parts)
+    if types == {"Polygon"}:
+        return MultiPolygon(parts)
+    return GeometryCollection(parts)
+
+
+def _placemark_geometry(placemark: Element) -> BaseGeometry:
+    elements = [c for c in placemark if _local(c.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS]
+    if not elements:
+        raise _GeometryError("no geometry")
+    # A <MultiGeometry> keeps its Multi* type even with one child; a bare geometry does not.
+    if len(elements) == 1 and _local(elements[0].tag) != "MultiGeometry":
+        return _simple_geometries(elements[0])[0]
+    parts = [g for el in elements for g in _simple_geometries(el)]
+    return _combine(parts)
+
+
+def _properties(placemark: Element) -> dict[str, str]:
+    props: dict[str, str] = {}
+    for tag in ("name", "description"):
+        value = _text(next(iter(_children(placemark, tag)), None))
+        if value is not None:
+            props[tag] = value
+    for extended in _children(placemark, "ExtendedData"):
+        for el in extended.iter():
+            key = el.get("name")
+            if not key:
+                continue
+            if _local(el.tag) == "Data":
+                value_nodes = _children(el, "value")
+                props.setdefault(key, _text(value_nodes[0]) or "" if value_nodes else "")
+            elif _local(el.tag) == "SimpleData":
+                props.setdefault(key, (el.text or "").strip())
+    return props
+
+
 def parse_kml(data: bytes) -> ParsedFile:
     if not data.strip():
         raise ParseError("file is empty")
     try:
         root = safe_et.fromstring(data, forbid_dtd=True)
-    except (safe_et.ParseError, DefusedXmlException, ValueError) as exc:
+    except (safe_et.ParseError, DefusedXmlException, ValueError, RecursionError) as exc:
         raise ParseError(f"not a readable KML (XML) file: {exc}") from exc
     if _local(root.tag) != "kml":
         raise ParseError(f"not a KML file: root element is <{_local(root.tag)}>, expected <kml>")
-    return ParsedFile(crs=WGS84, features=[], warnings=[])
+
+    features: list[Feature] = []
+    warnings: list[str] = []
+    for el in root.iter():
+        if _local(el.tag) != "Placemark":
+            continue
+        index = len(features)
+        try:
+            geometry = _placemark_geometry(el)
+        except (_GeometryError, RecursionError) as exc:
+            geometry = None
+            warnings.append(f"Placemark {index}: {exc}; geometry skipped")
+        features.append(
+            Feature(
+                index=index, source_id=el.get("id"), geometry=geometry, properties=_properties(el)
+            )
+        )
+    return ParsedFile(crs=WGS84, features=features, warnings=warnings)
