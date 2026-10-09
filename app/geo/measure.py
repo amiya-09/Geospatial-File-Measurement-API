@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 import shapely
-from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from app.geo.crs import project_local
@@ -40,6 +40,22 @@ def _parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
         yield geom
 
 
+def _measure_parts(parts: list[BaseGeometry], kind: str) -> tuple[float, str]:
+    """Sum the measure of each part, each in its own local projection.
+
+    Returns (total, crs label). Parts are never projected together: a shared projection
+    centred between distant parts would be accurate for none of them.
+    """
+    total, crs_strings = 0.0, []
+    for part in parts:
+        projected, crs = project_local(part, kind)
+        total += projected.area if kind == "laea" else projected.length
+        crs_strings.append(crs.srs)
+    if len(parts) == 1:
+        return total, crs_strings[0]
+    return total, f"local +proj={kind} per part ({len(parts)} parts)"
+
+
 def _check_lon_lat(geom: BaseGeometry) -> None:
     minx, miny, maxx, maxy = geom.bounds
     tol = _RANGE_TOLERANCE_DEG
@@ -52,8 +68,8 @@ def _check_lon_lat(geom: BaseGeometry) -> None:
 def measure(geom: BaseGeometry) -> Measurement:
     """Measure a geometry given in EPSG:4326 (lon, lat).
 
-    Polygons give area, lines give length, points give nothing. Parts of
-    multi-geometries are summed per measurement type. Invalid polygonal
+    Polygons give area, lines give length, points give nothing. Each part of a
+    multi-geometry is measured separately and the parts are summed. Invalid polygonal
     geometries are repaired with make_valid and only the polygonal pieces are
     measured; validity is reported either way.
     """
@@ -79,11 +95,9 @@ def measure(geom: BaseGeometry) -> Measurement:
 
     area_m2 = length_m = area_crs = length_crs = None
     if polys:
-        projected, crs = project_local(MultiPolygon(polys), "laea")
-        area_m2, area_crs = projected.area, crs.srs
+        area_m2, area_crs = _measure_parts(polys, "laea")
     if lines:
-        projected, crs = project_local(MultiLineString(lines), "aeqd")
-        length_m, length_crs = projected.length, crs.srs
+        length_m, length_crs = _measure_parts(lines, "aeqd")
 
     reason = None
     if area_m2 is None and length_m is None:

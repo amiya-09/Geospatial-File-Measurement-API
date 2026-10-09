@@ -133,3 +133,30 @@ def test_length_result_reports_unit_and_measurement_crs():
 def test_unmeasured_feature_reports_no_unit_or_crs():
     m = measure(Point(1, 1))
     assert (m.area_unit, m.area_crs, m.length_unit, m.length_crs) == (None, None, None, None)
+
+
+def test_distant_polygon_parts_equal_the_sum_of_independently_measured_parts():
+    a = Polygon(ev.BOX_EQUATOR["coords"])
+    b_coords = [(100, 50), (101, 50), (101, 51), (100, 51)]
+    b = Polygon(b_coords)
+    m = measure(MultiPolygon([a, b]))
+    assert m.area_m2 == pytest.approx(measure(a).area_m2 + measure(b).area_m2, rel=1e-12)
+    assert m.area_m2 == pytest.approx(
+        geod_area(ev.BOX_EQUATOR["coords"]) + geod_area(b_coords), rel=0.001
+    )
+    assert "laea" in m.area_crs and "2" in m.area_crs  # one local CRS per part
+
+
+def test_distant_line_parts_equal_the_sum_of_independently_measured_parts():
+    a = LineString([(0, 0), (1, 0)])
+    b = LineString([(-120, -45), (-119, -45)])
+    m = measure(MultiLineString([a, b]))
+    assert m.length_m == pytest.approx(measure(a).length_m + measure(b).length_m, rel=1e-12)
+    assert m.length_m == pytest.approx(
+        geod_length(list(a.coords)) + geod_length(list(b.coords)), rel=0.001
+    )
+
+
+def test_single_part_keeps_its_exact_proj_string_as_crs():
+    m = measure(MultiPolygon([Polygon(ev.BOX_EQUATOR["coords"])]))
+    assert m.area_crs.startswith("+proj=laea +lat_0=")
