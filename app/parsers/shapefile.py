@@ -1,13 +1,26 @@
 """Shapefile ZIP parser. The archive is validated and read entirely in memory."""
 
+import codecs
+import datetime
 import io
 import re
+import struct
 import zipfile
 import zlib
 from posixpath import splitext
+from typing import Any
+
+import shapefile
+import shapely
+from pyproj import CRS
+from pyproj.exceptions import CRSError
+from shapely.errors import ShapelyError
+from shapely.geometry import shape
 
 from app.config import MAX_UNCOMPRESSED_BYTES, MAX_UPLOAD_BYTES, MAX_ZIP_ENTRIES
-from app.parsers.base import ParseError
+from app.parsers.base import Feature, ParsedFile, ParseError, UnmeasurableError
+
+WGS84 = CRS.from_epsg(4326)
 
 _ZIP_SIGNATURE = b"PK\x03\x04"
 _MEMBER_EXTENSIONS = {".shp", ".shx", ".dbf", ".prj", ".cpg"}
@@ -99,3 +112,103 @@ def read_zip_members(
                 raise ParseError(f"ZIP uncompressed size exceeds the {max_uncompressed} byte limit")
             result[ext] = blob
         return result
+
+
+def _encoding_from_cpg(cpg: bytes | None, warnings: list[str]) -> str:
+    """Codec named by the .cpg file, else UTF-8. An unrecognised name is warned about."""
+    if cpg is None:
+        return "utf-8"
+    name = cpg.decode("ascii", errors="ignore").strip()
+    if name.isdigit():
+        name = f"cp{name}"  # Windows code page number, e.g. "1252"
+    try:
+        return codecs.lookup(name).name
+    except LookupError:
+        warnings.append(f"unrecognised encoding {name!r} in .cpg; assuming UTF-8")
+        return "utf-8"
+
+
+def _is_decode_error(exc: BaseException) -> bool:
+    """pyshp reports a text decoding failure as a dbfFileException with this message."""
+    return isinstance(exc, UnicodeDecodeError) or (
+        isinstance(exc, shapefile.dbfFileException) and "Could not decode" in str(exc)
+    )
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime.date | datetime.datetime):
+        return value.isoformat()
+    return value
+
+
+def _read_features(
+    members: dict[str, bytes | None], encoding: str
+) -> tuple[list[Feature], list[str]]:
+    features: list[Feature] = []
+    warnings: list[str] = []
+    with shapefile.Reader(
+        shp=io.BytesIO(members["shp"]),
+        shx=io.BytesIO(members["shx"]),
+        dbf=io.BytesIO(members["dbf"]),
+        encoding=encoding,
+    ) as reader:
+        for index, shape_record in enumerate(reader.iterShapeRecords()):
+            geometry = None
+            if shape_record.shape.shapeType == shapefile.NULL:
+                warnings.append(f"feature {index}: null shape; no geometry")
+            else:
+                try:
+                    geometry = shape(shape_record.shape.__geo_interface__)
+                except (shapefile.GeoJSON_Error, ShapelyError, ValueError) as exc:
+                    warnings.append(f"feature {index}: geometry could not be read ({exc})")
+            properties = {k: _json_safe(v) for k, v in shape_record.record.as_dict().items()}
+            features.append(Feature(index, None, geometry, properties))
+    return features, warnings
+
+
+def _resolve_crs(prj: bytes | None, features: list[Feature], warnings: list[str]) -> CRS:
+    if prj is not None:
+        try:
+            return CRS.from_wkt(prj.decode("utf-8", errors="replace"))
+        except CRSError as exc:
+            raise UnmeasurableError(f"could not interpret the .prj file: {exc}") from exc
+    # No .prj: only safe to assume WGS84 if every coordinate could be a lon/lat degree.
+    geoms = [f.geometry for f in features if f.geometry is not None and not f.geometry.is_empty]
+    if geoms:
+        minx, miny, maxx, maxy = shapely.total_bounds(geoms)
+        if minx < -180 or maxx > 180 or miny < -90 or maxy > 90:
+            raise UnmeasurableError(
+                "no .prj file and coordinates are outside the lon/lat range, "
+                "so the coordinate system cannot be determined"
+            )
+    warnings.append("no .prj file found; assumed EPSG:4326 because all coordinates fit lon/lat")
+    return WGS84
+
+
+def parse_shapefile_zip(data: bytes, **limits: int) -> ParsedFile:
+    """Parse a ZIP containing one shapefile. ``limits`` are passed to read_zip_members."""
+    members = read_zip_members(data, **limits)
+    warnings: list[str] = []
+    encoding = _encoding_from_cpg(members["cpg"], warnings)
+    try:
+        try:
+            features, read_warnings = _read_features(members, encoding)
+        except (UnicodeDecodeError, shapefile.ShapefileException) as exc:
+            if encoding == "latin-1" or not _is_decode_error(exc):
+                raise
+            warnings.append(f"attribute text is not valid {encoding}; decoded as latin-1")
+            features, read_warnings = _read_features(members, "latin-1")
+    except (
+        shapefile.ShapefileException,
+        struct.error,
+        ValueError,
+        IndexError,
+        KeyError,
+        EOFError,
+        OverflowError,
+    ) as exc:
+        raise ParseError(f"could not read the shapefile: {exc}") from exc
+    warnings += read_warnings
+    return ParsedFile(
+        crs=_resolve_crs(members["prj"], features, warnings), features=features, warnings=warnings
+    )
