@@ -5,8 +5,8 @@ come from runs against pyproj.Geod(ellps="WGS84").
 """
 
 import pytest
-from pyproj import Geod
 import shapely
+from pyproj import Geod
 from shapely.geometry import LineString, Polygon
 
 from app.geo.measure import MeasurementError, measure
