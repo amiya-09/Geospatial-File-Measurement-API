@@ -78,3 +78,40 @@ def test_external_entity_is_rejected_and_not_resolved():
     )
     with pytest.raises(ParseError):
         parse_kml(xxe)
+
+
+# ---- nesting depth ----
+
+PLACEMARK = "<Placemark><Point><coordinates>1,1</coordinates></Point></Placemark>"
+
+
+def nested(tag: str, depth: int, inner: str) -> str:
+    return f"<{tag}>" * depth + inner + f"</{tag}>" * depth
+
+
+def test_deeply_nested_folders_are_rejected_cleanly():
+    data = kml(nested("Folder", 10_000, PLACEMARK))
+    with pytest.raises(ParseError, match="nested"):
+        parse_kml(data)
+
+
+def test_deeply_nested_multigeometry_is_rejected_cleanly_not_with_recursion_error():
+    point = "<Point><coordinates>1,1</coordinates></Point>"
+    data = kml(f"<Placemark>{nested('MultiGeometry', 10_000, point)}</Placemark>")
+    with pytest.raises(ParseError, match="nested"):
+        parse_kml(data)
+
+
+def test_nesting_up_to_the_limit_is_accepted_and_one_more_is_not():
+    # <kml><Document> take 2 levels, then the folders, then <Placemark><Point><coordinates>
+    folders = 50 - 2 - 3
+    assert len(parse_kml(kml(nested("Folder", folders, PLACEMARK))).features) == 1
+    with pytest.raises(ParseError, match="nested"):
+        parse_kml(kml(nested("Folder", folders + 1, PLACEMARK)))
+
+
+def test_max_depth_is_configurable():
+    data = kml(nested("Folder", 5, PLACEMARK))
+    assert len(parse_kml(data, max_depth=20).features) == 1
+    with pytest.raises(ParseError, match="nested"):
+        parse_kml(data, max_depth=8)

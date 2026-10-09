@@ -5,6 +5,7 @@ keep the feature with ``geometry=None`` and add a warning, so indexes stay stabl
 with the file as a whole raise ParseError.
 """
 
+import io
 import math
 import re
 from xml.etree.ElementTree import Element
@@ -24,7 +25,7 @@ from shapely.geometry import (
 )
 from shapely.geometry.base import BaseGeometry
 
-from app.config import MAX_FEATURES, MAX_VERTICES
+from app.config import MAX_FEATURES, MAX_VERTICES, MAX_XML_DEPTH
 from app.parsers.base import Feature, ParsedFile, ParseError, VertexBudget
 
 WGS84 = CRS.from_epsg(4326)
@@ -160,15 +161,40 @@ def _properties(placemark: Element) -> dict[str, str]:
     return props
 
 
+def _parse_xml(data: bytes, max_depth: int) -> Element:
+    """Parse safely, aborting as soon as nesting passes ``max_depth`` (root is depth 1)."""
+    root, depth = None, 0
+    try:
+        for event, el in safe_et.iterparse(
+            io.BytesIO(data), events=("start", "end"), forbid_dtd=True
+        ):
+            if event == "end":
+                depth -= 1
+                continue
+            depth += 1
+            if root is None:
+                root = el
+            if depth > max_depth:
+                raise ParseError(f"XML is nested more than {max_depth} levels deep")
+    except ParseError:
+        raise
+    except (safe_et.ParseError, DefusedXmlException, ValueError, RecursionError) as exc:
+        raise ParseError(f"not a readable KML (XML) file: {exc}") from exc
+    if root is None:
+        raise ParseError("not a readable KML (XML) file: no root element")
+    return root
+
+
 def parse_kml(
-    data: bytes, *, max_features: int = MAX_FEATURES, max_vertices: int = MAX_VERTICES
+    data: bytes,
+    *,
+    max_features: int = MAX_FEATURES,
+    max_vertices: int = MAX_VERTICES,
+    max_depth: int = MAX_XML_DEPTH,
 ) -> ParsedFile:
     if not data.strip():
         raise ParseError("file is empty")
-    try:
-        root = safe_et.fromstring(data, forbid_dtd=True)
-    except (safe_et.ParseError, DefusedXmlException, ValueError, RecursionError) as exc:
-        raise ParseError(f"not a readable KML (XML) file: {exc}") from exc
+    root = _parse_xml(data, max_depth)
     if _local(root.tag) != "kml":
         raise ParseError(f"not a KML file: root element is <{_local(root.tag)}>, expected <kml>")
 
