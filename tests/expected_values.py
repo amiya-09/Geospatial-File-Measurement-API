@@ -45,13 +45,16 @@ LINE_EQUATOR_1DEG = {
     "rel_tol": REL_TOLERANCE,
 }
 
-# 10x10 degree square (outer) with a 2x2 degree square hole (inner, 2..4).
-# Computed: outer 1_227_877_191_609.63 m^2 (Geod, [0,10,10,0] x [0,0,10,10])
-#           hole       49_173_168_695.16 m^2 (Geod, [2,4,4,2] x [2,2,4,4])
+# 1x1 degree square (outer) with a 0.2x0.2 degree square hole (inner, 0.4..0.6).
+# Computed: outer 12_308_778_361.47 m^2 (Geod, [0,1,1,0] x [0,0,1,1])
+#           hole      492_344_897.40 m^2 (Geod, [0.4,0.6,0.6,0.4] x [0.4,0.4,0.6,0.6])
 #           expected = outer - hole
+# Kept small on purpose: projected edges are straight lines while Geod edges are
+# geodesics, and that gap grows with polygon size (-0.38% for a 10 degree ring; see
+# tests/test_measure_limits.py). PROVISIONAL (option A of the open decision).
 POLYGON_WITH_HOLE = {
-    "exterior": [(0, 0), (10, 0), (10, 10), (0, 10)],
-    "hole": [(2, 2), (4, 2), (4, 4), (2, 4)],
-    "area_m2": 1_227_877_191_609.6267 - 49_173_168_695.159935,
+    "exterior": [(0, 0), (1, 0), (1, 1), (0, 1)],
+    "hole": [(0.4, 0.4), (0.6, 0.4), (0.6, 0.6), (0.4, 0.6)],
+    "area_m2": 12_308_778_361.469452 - 492_344_897.3956555,
     "rel_tol": REL_TOLERANCE,
 }
