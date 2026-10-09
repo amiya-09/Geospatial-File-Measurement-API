@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+import numpy as np
 import shapely
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
@@ -29,6 +30,7 @@ class Measurement:
     area_crs: str | None = None
     length_unit: str | None = None
     length_crs: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def _parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
@@ -40,20 +42,56 @@ def _parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
         yield geom
 
 
-def _measure_parts(parts: list[BaseGeometry], kind: str) -> tuple[float, str]:
+def _lon_span(geom: BaseGeometry) -> float:
+    minx, _, maxx, _ = geom.bounds
+    return maxx - minx
+
+
+def _unwrap_antimeridian(part: BaseGeometry) -> tuple[BaseGeometry, bool]:
+    """Fix a part written with wrapped longitudes (e.g. 179 -> -179 across the antimeridian).
+
+    If the part spans more than 180 degrees of longitude, also try it with negative
+    longitudes shifted by +360 and keep whichever span is smaller. Raises MeasurementError
+    when neither is 180 degrees or less. Returns (part, whether the shift was applied).
+    """
+    span = _lon_span(part)
+    if span <= 180:
+        return part, False
+
+    def shift(coords: np.ndarray) -> np.ndarray:
+        shifted = coords.copy()
+        shifted[:, 0] = np.where(shifted[:, 0] < 0, shifted[:, 0] + 360.0, shifted[:, 0])
+        return shifted
+
+    alternative = shapely.transform(part, shift)
+    alt_span = _lon_span(alternative)
+    if min(span, alt_span) > 180:
+        raise MeasurementError(
+            f"feature spans {min(span, alt_span):.1f} degrees of longitude even after "
+            "unwrapping the antimeridian; it cannot be measured"
+        )
+    if alt_span < span:
+        return alternative, True
+    return part, False
+
+
+def _measure_parts(parts: list[BaseGeometry], kind: str) -> tuple[float, str, int]:
     """Sum the measure of each part, each in its own local projection.
 
-    Returns (total, crs label). Parts are never projected together: a shared projection
-    centred between distant parts would be accurate for none of them.
+    Returns (total, crs label, number of parts unwrapped across the antimeridian). Parts are
+    never projected together: a shared projection centred between distant parts would be
+    accurate for none of them.
     """
-    total, crs_strings = 0.0, []
+    total, crs_strings, unwrapped = 0.0, [], 0
     for part in parts:
+        part, shifted = _unwrap_antimeridian(part)
+        unwrapped += shifted
         projected, crs = project_local(part, kind)
         total += projected.area if kind == "laea" else projected.length
         crs_strings.append(crs.srs)
     if len(parts) == 1:
-        return total, crs_strings[0]
-    return total, f"local +proj={kind} per part ({len(parts)} parts)"
+        return total, crs_strings[0], unwrapped
+    return total, f"local +proj={kind} per part ({len(parts)} parts)", unwrapped
 
 
 def _check_lon_lat(geom: BaseGeometry) -> None:
@@ -94,10 +132,19 @@ def measure(geom: BaseGeometry) -> Measurement:
     unsupported += [p for p in parts if p.geom_type == "LinearRing"]
 
     area_m2 = length_m = area_crs = length_crs = None
+    unwrapped = 0
     if polys:
-        area_m2, area_crs = _measure_parts(polys, "laea")
+        area_m2, area_crs, n = _measure_parts(polys, "laea")
+        unwrapped += n
     if lines:
-        length_m, length_crs = _measure_parts(lines, "aeqd")
+        length_m, length_crs, n = _measure_parts(lines, "aeqd")
+        unwrapped += n
+    warnings = ()
+    if unwrapped:
+        warnings = (
+            f"antimeridian: negative longitudes were shifted by +360 for {unwrapped} part(s) "
+            "that spanned more than 180 degrees of longitude",
+        )
 
     reason = None
     if area_m2 is None and length_m is None:
@@ -112,4 +159,5 @@ def measure(geom: BaseGeometry) -> Measurement:
         area_crs=area_crs,
         length_unit="m" if length_m is not None else None,
         length_crs=length_crs,
+        warnings=warnings,
     )

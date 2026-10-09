@@ -40,17 +40,6 @@ def test_large_polygon_is_underestimated_because_projected_edges_are_not_geodesi
     assert -0.005 < rel_error < -0.003
 
 
-def test_antimeridian_feature_with_wrapped_longitudes_is_currently_wildly_wrong():
-    # KNOWN LIMITATION, not desired behaviour. A 2 degree wide box straddling 180 with
-    # wrapped longitudes (179 -> -179) is read as a 358 degree wide box, so the result is
-    # ~3,700x too large (area) with no warning and is_valid=True. See the stage A report.
-    coords = [(179, 0), (179, 1), (-179, 1), (-179, 0)]
-    true_area = geod_area([(179, 0), (179, 1), (181, 1), (181, 0)])
-    m = measure(Polygon(coords))
-    assert m.is_valid is True
-    assert m.area_m2 > 1000 * true_area
-
-
 def test_antimeridian_feature_with_continuous_longitudes_is_rejected():
     # Longitudes 179..181 are outside [-180, 180], so the lon/lat guard raises.
     with pytest.raises(MeasurementError):
