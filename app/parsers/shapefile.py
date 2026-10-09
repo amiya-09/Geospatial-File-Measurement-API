@@ -160,6 +160,11 @@ def _read_features(
         dbf=io.BytesIO(members["dbf"]),
         encoding=encoding,
     ) as reader:
+        if reader.numShapes != reader.numRecords:
+            raise ParseError(
+                f"shapefile has {reader.numShapes} shapes but its .dbf has "
+                f"{reader.numRecords} records; the files do not belong together"
+            )
         if len(reader) > max_features:
             raise ParseError(f"file has more than {max_features} features")
         for index, shape_record in enumerate(reader.iterShapeRecords()):

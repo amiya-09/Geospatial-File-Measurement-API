@@ -244,3 +244,47 @@ def test_non_finite_z_does_not_matter_because_z_is_dropped_later():
         lambda w: (w.pointz(3, 4, float("nan")), w.record("z")), shapefile.POINTZ
     )
     assert parse(parts).features[0].geometry is not None
+
+
+# ---- edge cases ----
+
+
+def test_all_null_shapefile_without_prj_assumes_wgs84_and_keeps_every_feature():
+    def build(w):
+        for i in range(3):
+            w.null()
+            w.record(f"n{i}")
+
+    parsed = parse(shapefile_parts(build, shapefile.POINT), prj=None)
+    assert [f.geometry for f in parsed.features] == [None, None, None]
+    assert [f.index for f in parsed.features] == [0, 1, 2]
+    assert parsed.crs.to_epsg() == 4326
+    assert any("assumed EPSG:4326" in w for w in parsed.warnings)
+    assert sum("null shape" in w for w in parsed.warnings) == 3
+
+
+def two_points(w):
+    w.point(1, 1)
+    w.record("a")
+    w.point(2, 2)
+    w.record("b")
+
+
+def one_point(w):
+    w.point(1, 1)
+    w.record("a")
+
+
+@pytest.mark.parametrize(
+    ("shp_builder", "dbf_builder"),
+    [(two_points, one_point), (one_point, two_points)],
+    ids=["more shapes than records", "more records than shapes"],
+)
+def test_shp_and_dbf_record_count_mismatch_is_rejected_not_silently_truncated(
+    shp_builder, dbf_builder
+):
+    shp_side = shapefile_parts(shp_builder, shapefile.POINT)
+    dbf_side = shapefile_parts(dbf_builder, shapefile.POINT)
+    mismatched = {"shp": shp_side["shp"], "shx": shp_side["shx"], "dbf": dbf_side["dbf"]}
+    with pytest.raises(ParseError, match="records"):
+        parse(mismatched)

@@ -194,3 +194,29 @@ def test_zip_bound_is_enforced_on_bytes_actually_read_not_on_the_header(parts, m
         read_zip_members(zipped, max_uncompressed=cap)
     # every read was explicitly bounded by the remaining budget (never size=-1 / unbounded)
     assert requested and all(0 < n <= cap + 1 for n in requested)
+
+
+def test_mixed_case_folder_names_still_group_one_shapefile(parts):
+    zipped = make_zip(
+        {
+            "Survey/data.shp": parts["shp"],
+            "SURVEY/Data.SHX": parts["shx"],
+            "survey/DATA.dbf": parts["dbf"],
+        }
+    )
+    assert read_zip_members(zipped)["shp"] == parts["shp"]
+
+
+@pytest.mark.parametrize("duplicate", ["data.SHX", "DATA.shx", "Data.Shx"])
+def test_case_variant_duplicate_of_any_member_is_rejected(parts, duplicate):
+    zipped = make_zip({**{f"data.{e}": d for e, d in parts.items()}, duplicate: parts["shx"]})
+    with pytest.raises(ParseError, match="duplicate"):
+        read_zip_members(zipped)
+
+
+def test_case_variant_shapefile_names_are_one_shapefile_not_two(parts):
+    # roads.shp + ROADS.SHX + Roads.dbf is a single (oddly cased) shapefile, not multiple
+    zipped = make_zip(
+        {"roads.shp": parts["shp"], "ROADS.SHX": parts["shx"], "Roads.dbf": parts["dbf"]}
+    )
+    assert read_zip_members(zipped)["dbf"] == parts["dbf"]
