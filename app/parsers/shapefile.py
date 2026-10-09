@@ -63,7 +63,7 @@ def read_zip_members(
         raise ParseError("not a ZIP archive (missing PK signature)")
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile as exc:
+    except (zipfile.BadZipFile, NotImplementedError, ValueError, EOFError, OverflowError) as exc:
         raise ParseError(f"not a readable ZIP archive: {exc}") from exc
 
     with archive:
@@ -112,6 +112,7 @@ def read_zip_members(
                 zipfile.BadZipFile,
                 zlib.error,
                 EOFError,
+                ValueError,  # e.g. a corrupt header offset (negative seek)
             ) as exc:
                 raise ParseError(f"could not read {info.filename!r} from ZIP: {exc}") from exc
             budget -= len(blob)
@@ -130,7 +131,7 @@ def _encoding_from_cpg(cpg: bytes | None, warnings: list[str]) -> str:
         name = f"cp{name}"  # Windows code page number, e.g. "1252"
     try:
         return codecs.lookup(name).name
-    except LookupError:
+    except (LookupError, ValueError):  # unknown codec name, or a name with a NUL byte
         warnings.append(f"unrecognised encoding {name!r} in .cpg; assuming UTF-8")
         return "utf-8"
 

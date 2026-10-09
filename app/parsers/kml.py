@@ -178,7 +178,13 @@ def _parse_xml(data: bytes, max_depth: int) -> Element:
                 raise ParseError(f"XML is nested more than {max_depth} levels deep")
     except ParseError:
         raise
-    except (safe_et.ParseError, DefusedXmlException, ValueError, RecursionError) as exc:
+    except (
+        safe_et.ParseError,
+        DefusedXmlException,
+        ValueError,
+        LookupError,  # unknown encoding named in the XML declaration
+        RecursionError,
+    ) as exc:
         raise ParseError(f"not a readable KML (XML) file: {exc}") from exc
     if root is None:
         raise ParseError("not a readable KML (XML) file: no root element")
