@@ -64,3 +64,12 @@ def test_project_local_returns_the_crs_it_used():
     _, crs = project_local(poly, kind="aeqd")
     assert "+proj=aeqd" in crs.srs
     assert "+lon_0=20.5" in crs.srs
+
+
+@pytest.mark.parametrize(
+    ("lon", "expected"),
+    [(190.5, "-169.5"), (360.0, "0.0"), (-181.0, "179.0"), (45.0, "45.0")],
+)
+def test_local_projections_normalise_lon_0_into_minus_180_180(lon, expected):
+    assert f"+lon_0={expected} " in local_laea(lon=lon, lat=0.0).srs
+    assert f"+lon_0={expected} " in local_aeqd(lon=lon, lat=0.0).srs

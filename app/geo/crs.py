@@ -27,13 +27,20 @@ def to_wgs84(geom: BaseGeometry, source_crs: CRS) -> BaseGeometry:
     return _reproject(geom, transformer)
 
 
+def _normalise_lon(lon: float) -> float:
+    """Wrap a longitude into [-180, 180) (unwrapped features can have centroids above 180)."""
+    return (lon + 180.0) % 360.0 - 180.0
+
+
 def local_laea(lon: float, lat: float) -> CRS:
     """Lambert Azimuthal Equal-Area on WGS84, centred on (lon, lat). Used for area."""
+    lon = _normalise_lon(lon)
     return CRS.from_proj4(f"+proj=laea +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m +no_defs")
 
 
 def local_aeqd(lon: float, lat: float) -> CRS:
     """Azimuthal Equidistant on WGS84, centred on (lon, lat). Used for length."""
+    lon = _normalise_lon(lon)
     return CRS.from_proj4(f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m +no_defs")
 
 
