@@ -39,11 +39,6 @@ def test_box_at_60n_matches_reference():
     assert m.area_m2 == pytest.approx(ev.BOX_60N["area_m2"], rel=ev.BOX_60N["rel_tol"])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="OPEN DECISION: 10 deg outer ring differs -0.38% from the geodesic reference because "
-    "projected edges are straight lines, not geodesics. See stage 1 report.",
-)
 def test_polygon_with_hole_matches_reference():
     m = measure(Polygon(ev.POLYGON_WITH_HOLE["exterior"], [ev.POLYGON_WITH_HOLE["hole"]]))
     assert m.area_m2 == pytest.approx(
@@ -119,3 +114,22 @@ def test_geometry_collection_measures_each_part_by_type():
     assert m.area_m2 == pytest.approx(geod_area(poly), rel=0.001)
     assert m.length_m == pytest.approx(geod_length(line), rel=0.001)
     assert m.reason is None
+
+
+def test_area_result_reports_unit_and_measurement_crs():
+    m = measure(Polygon(ev.BOX_60N["coords"]))
+    assert m.area_unit == "m2"
+    assert "+proj=laea" in m.area_crs and "+datum=WGS84" in m.area_crs
+    assert m.length_unit is None and m.length_crs is None
+
+
+def test_length_result_reports_unit_and_measurement_crs():
+    m = measure(LineString(ev.LINE_EQUATOR_1DEG["coords"]))
+    assert m.length_unit == "m"
+    assert "+proj=aeqd" in m.length_crs and "+datum=WGS84" in m.length_crs
+    assert m.area_unit is None and m.area_crs is None
+
+
+def test_unmeasured_feature_reports_no_unit_or_crs():
+    m = measure(Point(1, 1))
+    assert (m.area_unit, m.area_crs, m.length_unit, m.length_crs) == (None, None, None, None)

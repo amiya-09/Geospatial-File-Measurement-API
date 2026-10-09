@@ -48,7 +48,7 @@ def test_local_aeqd_is_projected_in_metres_centred_on_input():
 
 def test_project_local_centres_projection_on_geometry_centroid():
     poly = Polygon([(20, 40), (21, 40), (21, 41), (20, 41)])
-    projected = project_local(poly, kind="laea")
+    projected, _ = project_local(poly, kind="laea")
     cx, cy = projected.centroid.x, projected.centroid.y
     # ~0.5 deg off-centre at most, so well within 100 km of the origin
     assert abs(cx) < 100_000 and abs(cy) < 100_000
@@ -57,3 +57,10 @@ def test_project_local_centres_projection_on_geometry_centroid():
 def test_project_local_rejects_unknown_kind():
     with pytest.raises(ValueError):
         project_local(LineString([(0, 0), (1, 1)]), kind="utm")
+
+
+def test_project_local_returns_the_crs_it_used():
+    poly = Polygon([(20, 40), (21, 40), (21, 41), (20, 41)])
+    _, crs = project_local(poly, kind="aeqd")
+    assert "+proj=aeqd" in crs.srs
+    assert "+lon_0=20.5" in crs.srs

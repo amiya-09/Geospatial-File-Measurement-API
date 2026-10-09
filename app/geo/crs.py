@@ -37,10 +37,11 @@ def local_aeqd(lon: float, lat: float) -> CRS:
     return CRS.from_proj4(f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m +no_defs")
 
 
-def project_local(geom_wgs84: BaseGeometry, kind: str) -> BaseGeometry:
+def project_local(geom_wgs84: BaseGeometry, kind: str) -> tuple[BaseGeometry, CRS]:
     """Project a WGS84 geometry into a local CRS centred on its own centroid.
 
-    ``kind`` is "laea" (area) or "aeqd" (length).
+    ``kind`` is "laea" (area) or "aeqd" (length). Returns the projected geometry and the
+    CRS used.
     """
     builders = {"laea": local_laea, "aeqd": local_aeqd}
     if kind not in builders:
@@ -48,4 +49,4 @@ def project_local(geom_wgs84: BaseGeometry, kind: str) -> BaseGeometry:
     centre = geom_wgs84.centroid
     crs = builders[kind](lon=centre.x, lat=centre.y)
     transformer = Transformer.from_crs(WGS84, crs, always_xy=True)
-    return _reproject(geom_wgs84, transformer)
+    return _reproject(geom_wgs84, transformer), crs

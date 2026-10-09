@@ -67,7 +67,7 @@ def test_empty_polygon_is_reported_not_raised():
 def test_unsupported_geometry_type_is_reported_not_raised():
     m = measure(LinearRing([(0, 0), (1, 0), (1, 1)]))
     assert m.area_m2 is None and m.length_m is None
-    assert m.reason == "unsupported geometry type: LinearRing"
+    assert m.reason == "unsupported"
 
 
 @pytest.mark.parametrize(

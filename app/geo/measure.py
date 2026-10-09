@@ -24,6 +24,11 @@ class Measurement:
     is_valid: bool
     validity_reason: str | None  # shapely's explanation when is_valid is False
     reason: str | None  # why nothing was measured (None when something was)
+    # Unit and local CRS (PROJ string) behind each value; None when that value is None.
+    area_unit: str | None = None
+    area_crs: str | None = None
+    length_unit: str | None = None
+    length_crs: str | None = None
 
 
 def _parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
@@ -72,16 +77,25 @@ def measure(geom: BaseGeometry) -> Measurement:
     unsupported = [p for p in parts if not isinstance(p, Point | Polygon | LineString)]
     unsupported += [p for p in parts if p.geom_type == "LinearRing"]
 
-    area_m2 = length_m = None
+    area_m2 = length_m = area_crs = length_crs = None
     if polys:
-        area_m2 = project_local(MultiPolygon(polys), "laea").area
+        projected, crs = project_local(MultiPolygon(polys), "laea")
+        area_m2, area_crs = projected.area, crs.srs
     if lines:
-        length_m = project_local(MultiLineString(lines), "aeqd").length
+        projected, crs = project_local(MultiLineString(lines), "aeqd")
+        length_m, length_crs = projected.length, crs.srs
 
     reason = None
     if area_m2 is None and length_m is None:
-        if unsupported:
-            reason = f"unsupported geometry type: {unsupported[0].geom_type}"
-        else:
-            reason = "not applicable"
-    return Measurement(area_m2, length_m, is_valid, validity_reason, reason)
+        reason = "unsupported" if unsupported else "not applicable"
+    return Measurement(
+        area_m2=area_m2,
+        length_m=length_m,
+        is_valid=is_valid,
+        validity_reason=validity_reason,
+        reason=reason,
+        area_unit="m2" if area_m2 is not None else None,
+        area_crs=area_crs,
+        length_unit="m" if length_m is not None else None,
+        length_crs=length_crs,
+    )
