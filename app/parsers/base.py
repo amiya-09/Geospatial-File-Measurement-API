@@ -32,3 +32,19 @@ class ParsedFile:
     crs: CRS
     features: list[Feature]
     warnings: list[str] = field(default_factory=list)
+
+
+class VertexBudget:
+    """Running vertex count for one file; ``take`` raises ParseError once the limit is passed.
+
+    Parsers call it with a count taken from the raw input, before building shapely geometry.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.used = 0
+
+    def take(self, count: int) -> None:
+        self.used += count
+        if self.used > self.limit:
+            raise ParseError(f"file has more than {self.limit} vertices")

@@ -24,7 +24,8 @@ from shapely.geometry import (
 )
 from shapely.geometry.base import BaseGeometry
 
-from app.parsers.base import Feature, ParsedFile, ParseError
+from app.config import MAX_FEATURES, MAX_VERTICES
+from app.parsers.base import Feature, ParsedFile, ParseError, VertexBudget
 
 WGS84 = CRS.from_epsg(4326)
 
@@ -52,13 +53,15 @@ def _text(el: Element | None) -> str | None:
     return el.text.strip() or None
 
 
-def _coordinates(el: Element) -> list[tuple[float, float]]:
+def _coordinates(el: Element, budget: VertexBudget) -> list[tuple[float, float]]:
     """Parse a geometry's <coordinates>: whitespace-separated lon,lat[,alt]; altitude dropped."""
     nodes = _children(el, "coordinates")
     if not nodes:
         raise _GeometryError("missing <coordinates>")
+    tokens = _COMMA_SPACES.sub(",", nodes[0].text or "").split()
+    budget.take(len(tokens))  # counted from the raw text, before any float or geometry is built
     points = []
-    for token in _COMMA_SPACES.sub(",", nodes[0].text or "").split():
+    for token in tokens:
         parts = token.split(",")
         if len(parts) not in (2, 3):
             raise _GeometryError(f"bad coordinate {token!r}")
@@ -74,31 +77,31 @@ def _coordinates(el: Element) -> list[tuple[float, float]]:
     return points
 
 
-def _ring(boundary: Element) -> list[tuple[float, float]]:
+def _ring(boundary: Element, budget: VertexBudget) -> list[tuple[float, float]]:
     rings = _children(boundary, "LinearRing")
     if not rings:
         raise _GeometryError("boundary has no <LinearRing>")
-    return _coordinates(rings[0])
+    return _coordinates(rings[0], budget)
 
 
-def _simple_geometries(el: Element) -> list[BaseGeometry]:
+def _simple_geometries(el: Element, budget: VertexBudget) -> list[BaseGeometry]:
     """Geometries for one geometry element; MultiGeometry is flattened recursively."""
     kind = _local(el.tag)
     try:
         if kind == "Point":
-            points = _coordinates(el)
+            points = _coordinates(el, budget)
             if len(points) != 1:
                 raise _GeometryError("<Point> must have exactly one coordinate")
             return [Point(points[0])]
         if kind in ("LineString", "LinearRing"):
-            return [LineString(_coordinates(el))]
+            return [LineString(_coordinates(el, budget))]
         if kind == "Polygon":
             outer = _children(el, "outerBoundaryIs")
             if not outer:
                 raise _GeometryError("<Polygon> has no <outerBoundaryIs>")
-            holes = [_ring(b) for b in _children(el, "innerBoundaryIs")]
-            return [Polygon(_ring(outer[0]), holes)]
-    except _GeometryError:
+            holes = [_ring(b, budget) for b in _children(el, "innerBoundaryIs")]
+            return [Polygon(_ring(outer[0], budget), holes)]
+    except (_GeometryError, ParseError):
         raise
     except (ValueError, ShapelyError) as exc:  # shapely: too few points, etc.
         raise _GeometryError(str(exc)) from exc
@@ -106,7 +109,7 @@ def _simple_geometries(el: Element) -> list[BaseGeometry]:
         parts = []
         for child in el:
             if _local(child.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS:
-                parts.extend(_simple_geometries(child))
+                parts.extend(_simple_geometries(child, budget))
         if not parts:
             raise _GeometryError("empty <MultiGeometry>")
         return parts
@@ -127,14 +130,14 @@ def _combine(parts: list[BaseGeometry]) -> BaseGeometry:
     return GeometryCollection(parts)
 
 
-def _placemark_geometry(placemark: Element) -> BaseGeometry:
+def _placemark_geometry(placemark: Element, budget: VertexBudget) -> BaseGeometry:
     elements = [c for c in placemark if _local(c.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS]
     if not elements:
         raise _GeometryError("no geometry")
     # A <MultiGeometry> keeps its Multi* type even with one child; a bare geometry does not.
     if len(elements) == 1 and _local(elements[0].tag) != "MultiGeometry":
-        return _simple_geometries(elements[0])[0]
-    parts = [g for el in elements for g in _simple_geometries(el)]
+        return _simple_geometries(elements[0], budget)[0]
+    parts = [g for el in elements for g in _simple_geometries(el, budget)]
     return _combine(parts)
 
 
@@ -157,7 +160,9 @@ def _properties(placemark: Element) -> dict[str, str]:
     return props
 
 
-def parse_kml(data: bytes) -> ParsedFile:
+def parse_kml(
+    data: bytes, *, max_features: int = MAX_FEATURES, max_vertices: int = MAX_VERTICES
+) -> ParsedFile:
     if not data.strip():
         raise ParseError("file is empty")
     try:
@@ -169,12 +174,15 @@ def parse_kml(data: bytes) -> ParsedFile:
 
     features: list[Feature] = []
     warnings: list[str] = []
+    budget = VertexBudget(max_vertices)
     for el in root.iter():
         if _local(el.tag) != "Placemark":
             continue
         index = len(features)
+        if index >= max_features:
+            raise ParseError(f"file has more than {max_features} features")
         try:
-            geometry = _placemark_geometry(el)
+            geometry = _placemark_geometry(el, budget)
         except (_GeometryError, RecursionError) as exc:
             geometry = None
             warnings.append(f"Placemark {index}: {exc}; geometry skipped")
