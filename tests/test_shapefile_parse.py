@@ -198,6 +198,7 @@ def test_unreadable_prj_is_unmeasurable(prj):
 # ---- corrupt content ----
 
 
+@pytest.mark.filterwarnings("ignore::shapefile.PossiblyCorruptFileHeader")
 def test_garbage_shapefile_members_in_a_valid_zip_are_rejected():
     zipped = make_zip(
         {"data.shp": b"nope" * 50, "data.shx": b"nope" * 20, "data.dbf": b"nope" * 20}
@@ -206,6 +207,7 @@ def test_garbage_shapefile_members_in_a_valid_zip_are_rejected():
         parse_shapefile_zip(zipped)
 
 
+@pytest.mark.filterwarnings("ignore::shapefile.PossiblyCorruptFileHeader")
 def test_truncated_shp_is_rejected():
     parts = points([(1, 1), (2, 2)])
     parts["shp"] = parts["shp"][:110]

@@ -27,6 +27,11 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# pyshp warnings are errors unless a test marks them as expected (corrupt-fixture tests).
+filterwarnings = [
+    "error::shapefile.PossiblyCorruptFileHeader",
+    "error::shapefile.PossibleDataLoss",
+]
 
 [tool.ruff]
 line-length = 100
