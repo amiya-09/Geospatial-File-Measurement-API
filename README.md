@@ -8,6 +8,31 @@ or pyogrio.
 
 > Requirement-by-requirement status (tests, gaps, mismatches): [Requirements traceability](docs/compliance.md).
 
+## Features
+
+- The format is detected from the file content, not the filename.
+- Polygon area in m² and line length in m, each part measured in its own local equal-area or
+  equidistant projection. Points get no measurement, with a reason.
+- The source CRS is read from the `.prj`; geometry is returned as GeoJSON in EPSG:4326.
+- Invalid polygons are reported (`is_valid`, `validity_reason`) and repaired before measuring.
+  Features that cross the antimeridian are unwrapped.
+- File details, paged measurements and a paged list of uploads, stored in SQLite, with warnings
+  per file and per feature.
+- One error body shape, and limits on size, ZIP entries, features, vertices, parts and XML.
+
+## Supported formats
+
+- **Zipped Shapefile:** one shapefile per ZIP, subfolders allowed, with `.shp`, `.shx` and
+  `.dbf`. `.prj` gives the CRS (without it, EPSG:4326 is assumed only when every coordinate fits
+  lon/lat) and `.cpg` the attribute encoding. Points, multipoints, lines and polygons; Z values
+  are dropped.
+- **KML:** Placemarks with `Point`, `LineString`, `LinearRing`, `Polygon` (with holes) and
+  `MultiGeometry`. `name`, `description` and `ExtendedData` become properties; altitude is
+  dropped. Other geometry, such as `gx:Track`, is kept as a feature without geometry and with a
+  warning.
+- Not accepted: KMZ and ZIPs holding several shapefiles (400). Well-formed XML that is not KML,
+  and content that is neither ZIP nor XML, get 415.
+
 ## Setup
 
 Requires Python 3.11 or newer (the test suite passes on 3.11, 3.12 and 3.13). No system
@@ -36,9 +61,10 @@ uvicorn app.main:app --port 8000
 - The SQLite file is `geo_api.db` in the directory you start the server from (SQLite also
   creates `geo_api.db-wal` and `geo_api.db-shm` next to it while running); set
   `GEO_API_DB=/path/to/file.db` to change it. Tables are created at startup.
-- Limits (upload size 25 MB, uncompressed ZIP size 100 MB, ZIP entries, feature, vertex and part
-  counts, the size of a polygon that may be repaired, XML depth, concurrent uploads) are constants
-  in `app/config.py`; only the database path is read from the environment.
+- Limits (upload size 25 MB, uncompressed ZIP size 100 MB, `.dbf` size 25 MB, ZIP entries,
+  feature, vertex and part counts, the size of a polygon that may be repaired, XML depth and
+  element count, concurrent uploads) are constants in `app/config.py`; only the database path is
+  read from the environment.
 
 Tests, lint and the end-to-end smoke check:
 
@@ -138,8 +164,9 @@ curl "http://127.0.0.1:8000/api/files/87b4a389-ba1e-468a-91a1-ff7d0157a07c/measu
 - `geometry` is GeoJSON in **EPSG:4326** whatever the source CRS (`include_geometry=false`
   returns `null`). `crs` is the **source** CRS.
 - Every measured value carries its unit and the local projected CRS it was computed in.
-- A feature without usable geometry has `geometry: null` and `measurement.reason`
-  `"no geometry"`; points report `"not applicable"`.
+- A feature without usable geometry has `geometry: null`, `measurement.reason`
+  `"no geometry"` and the parser's reason in `warnings`; points report `"not applicable"`. The
+  other reasons are `"unsupported"`, `"empty geometry"` and `"no polygonal area after repair"`.
 - `limit` (1-1000, default: all) and `offset` page through features; `total` is the full count.
 
 Geometry of the polygon above (`include_geometry=true`), outer ring plus the hole:
@@ -166,6 +193,7 @@ curl "http://127.0.0.1:8000/api/files/?limit=1"
 | Status | `error.code` | When |
 |---|---|---|
 | 400 | `invalid_file` | Empty, corrupt or unsafe file (bad ZIP, zip-slip, broken XML, over parser limits). Nothing is stored. |
+| 400 | `invalid_request` | The request body cannot be parsed (a multipart body without a boundary, a broken one, or more than 1,000 parts). Nothing is stored. |
 | 404 | `not_found` | Unknown file id. |
 | 409 | `file_failed` | Measurements requested for a `FAILED` file; the stored error is returned. |
 | 413 | `payload_too_large` | Body or file over `MAX_UPLOAD_BYTES` (25 MB). |
@@ -225,22 +253,42 @@ plan.md              the agreed plan
 
 ## File-processing flow
 
+The upload path through the code (each box is a function and the file it is in):
+
+```mermaid
+flowchart TD
+    mw["BodyLimitMiddleware<br/>app/middleware.py"] --> route["upload_file<br/>app/api/files.py"]
+    route --> create["create_file<br/>app/services/files.py"]
+    create --> detect["parse_upload<br/>app/services/files.py"]
+    detect --> shp["parse_shapefile_zip<br/>app/parsers/shapefile.py"]
+    detect --> kml["parse_kml<br/>app/parsers/kml.py"]
+    create --> each["_measure_features<br/>app/services/files.py"]
+    each --> wgs["to_wgs84<br/>app/geo/crs.py"]
+    each --> measure["measure<br/>app/geo/measure.py"]
+    measure --> parts["_measure_parts<br/>app/geo/measure.py"]
+    parts --> local["project_local<br/>app/geo/crs.py"]
+    create --> store["add_file_with_features<br/>app/db/repository.py"]
+```
+
 1. **Body cap.** Middleware rejects a declared `Content-Length` over the cap with 413 before
    reading anything, and counts bytes for chunked bodies.
-2. **Read.** The route reads the upload in chunks and stops with 413 once `MAX_UPLOAD_BYTES`
-   is exceeded.
-3. **Wait for a slot.** At most four uploads are parsed and measured at once. Another upload
-   waits up to 2 s for a slot, then gets 503 `server_busy`. Reads never wait for a slot.
+2. **Wait for a slot.** At most four uploads are read, parsed and measured at once. Another
+   upload waits up to 2 s for a slot, then gets 503 `server_busy` before its body is read into
+   memory. GET requests never wait for a slot.
+3. **Read.** The upload is read in chunks, stopping with 413 once `MAX_UPLOAD_BYTES` is
+   exceeded.
 4. **Detect by content.** `PK\x03\x04` means zipped Shapefile; otherwise the KML parser runs.
    Well-formed XML that is not `<kml>` or unrecognised bytes give 415; broken ZIP/XML gives 400.
 5. **Parse.** Parsers return a `ParsedFile` (source CRS, features, warnings) or raise
    `ParseError` (unreadable, 4xx, nothing stored) / `UnmeasurableError` (stored as `FAILED`, 422).
-   - Shapefile ZIP: path-safety (zip-slip) checks, entry-count and size caps enforced on bytes
-     actually read, encrypted entries rejected, exactly one shapefile required, `.prj` read for
-     the CRS, `.cpg` for the text encoding (only known text encodings; anything else is ignored
-     with a warning and UTF-8 is assumed), DBF records flagged deleted are skipped.
-   - KML: DTDs and entities forbidden, nesting depth, feature and vertex limits; a Placemark
-     with bad geometry becomes a feature with `geometry: null` and a warning.
+   - Shapefile ZIP: path-safety (zip-slip) checks, entry-count and size caps (the `.dbf` at most
+     25 MB) enforced on bytes actually read, encrypted entries rejected, exactly one shapefile
+     required, `.prj` read for the CRS, `.cpg` for the text encoding (only known text encodings;
+     anything else is ignored with a warning and UTF-8 is assumed), DBF records flagged deleted
+     are skipped.
+   - KML: DTDs and entities forbidden, nesting depth, element count (500,000), feature and
+     vertex limits; a Placemark with bad geometry becomes a feature with `geometry: null` and a
+     warning.
    - Both: at most 20,000 lines and polygon rings per upload, counted before any geometry is
      built (400 above that). A feature with a coordinate outside longitude +/-180 or latitude
      +/-90 (KML, or a shapefile in a lon/lat CRS) is kept with `geometry: null` and a warning.
@@ -310,7 +358,7 @@ How the work was checked:
 
 - Tests first. For new behaviour and for bug fixes, the test was written and seen to fail
   before the code changed. A few tests that pinned behaviour already in place passed at once.
-  The suite has 418 tests and runs in CI on Python 3.11 and 3.12.
+  The suite has 459 tests and runs in CI on Python 3.11 and 3.12.
 - A fuzz test, `tests/test_parser_totality.py`. It takes valid KML files and shapefile ZIPs,
   corrupts them in seeded random ways (truncated, flipped, inserted, deleted and overwritten
   bytes), and checks that the parsers either return a result or raise one of their own errors
@@ -438,7 +486,8 @@ Where the API differs from the assignment or from `plan.md`:
   inside the request, so `PROCESSING` is never stored or returned (M3).
 - The plan says a point gets `measurement: null` with a reason. The API returns a `measurement`
   object whose values are all `null`, with `reason` set (`"not applicable"`, `"unsupported"`,
-  `"no geometry"`), so every feature has the same shape (M4).
+  `"no geometry"`, `"empty geometry"`, `"no polygonal area after repair"`), so every feature has
+  the same shape (M4).
 - Ids are UUID strings. The assignment's example shows `"abc123"`: the same type, a different
   value (M5).
 - The assignment does not define the measurements response. It is an object
@@ -499,8 +548,7 @@ Limits and known problems:
   EPSG:4978 is accepted and gives meaningless results (a line measured 0 m at the north pole).
 - A few status codes are inconsistent: a ZIP with no `.shp` (a KMZ, say) is 400 rather than 415;
   HTML is 400 with a DOCTYPE and 415 without one; a truncated KML is 400 in UTF-8 and 415 in
-  UTF-16; a multipart body without a boundary gives the code `http_error`, which the error table
-  above does not list.
+  UTF-16.
 - The measurements endpoint has no default page size, so one request returns every feature with
   its geometry (up to 10,000 features).
 - Large polygons come out slightly smaller than a geodesic calculation, because edges are

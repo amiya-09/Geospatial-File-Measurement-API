@@ -79,7 +79,7 @@ was actually checked, on 2026-10-10 unless stated.
 | Measurements response shape | "Returns measurements for the features in the file." No list or wrapper, no field names. `feature_count` appears only in the file information example. | An object `{file_id, crs, total, limit, offset, features}` | Live keys listed; the wrapper has no `feature_count` and the file details endpoint keeps it |
 | Multipart field name | Not named. | The upload must be the form field `file` | A field named `upload` returns 422. Since commit `9e82a17` the message names the expected field (`tests/test_api_files.py::test_missing_file_field_message_names_the_expected_field`) |
 | Status codes | None defined. | See "Status codes" below | n/a |
-| Processing limits | None defined. | `app/config.py`: upload 25 MB, uncompressed ZIP 100 MB, 100 ZIP entries, 10,000 features, 1,000,000 vertices, 20,000 lines and polygon rings, repair of invalid polygons up to 350 vertices, XML depth 50, four uploads processed at once | `tests/test_parser_limits.py::test_default_limits`; `tests/test_upload_slots.py::test_default_slot_settings`; the limit tests in `test_parser_limits.py`, `test_measure_repair.py` and `test_api_hostile.py` |
+| Processing limits | None defined. | `app/config.py`: upload 25 MB, uncompressed ZIP 100 MB, `.dbf` 25 MB, 100 ZIP entries, 10,000 features, 1,000,000 vertices, 20,000 lines and polygon rings, repair of invalid polygons up to 350 vertices, XML depth 50, 500,000 XML elements, four uploads processed at once | `tests/test_parser_limits.py::test_default_limits`; `tests/test_upload_slots.py::test_default_slot_settings`; the limit tests in `test_parser_limits.py`, `test_measure_repair.py` and `test_api_hostile.py` |
 | Coordinates outside lon/lat range | Not covered. | Strict check, no tolerance. KML, or a shapefile in a lon/lat CRS: that feature is kept with no geometry and a warning, and the rest of the file is stored (201). If no feature is left with a usable geometry, the file is unmeasurable (422, `FAILED` record). A shapefile without `.prj` whose coordinates do not fit lon/lat stays unmeasurable (422) | `tests/test_coordinate_range.py`; `test_api_files.py::test_kml_whose_only_feature_is_outside_lon_lat_is_422_with_a_failed_record`; `samples/bad_coordinates.kml` (422 in `scripts/smoke.sh`) |
 
 ## Yours to do
@@ -113,6 +113,7 @@ The assignment defines no status codes. This table is our own design.
 |---|---|---|---|
 | Created | 201 | n/a | `test_api_files.py::test_kml_upload_then_info_then_measurements` |
 | Corrupt, empty, unsafe or unreadable file | 400 | `invalid_file` | `test_api_files.py::test_error_status_and_code_by_kind_of_bad_content`; `test_api_hostile.py` |
+| Request body that cannot be parsed (multipart without a boundary, broken, or over 1,000 parts) | 400 | `invalid_request` | `test_api_errors.py::test_a_multipart_body_starlette_cannot_parse_is_400_invalid_request` |
 | Unknown id | 404 | `not_found` | `::test_unknown_id_is_404_on_both_get_routes` |
 | Measurements of a FAILED file | 409 | `file_failed` | `::test_unmeasurable_shapefile_is_422_and_leaves_a_readable_failed_record` |
 | Over the upload cap | 413 | `payload_too_large` | `::test_upload_over_the_cap_is_413_and_nothing_is_persisted`; `test_body_limit.py` |
