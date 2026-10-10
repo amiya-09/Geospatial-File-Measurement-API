@@ -459,3 +459,32 @@ def test_measurements_paging_bounds_are_validated(client, query):
 def test_measurements_limit_1000_is_accepted(client):
     fid = upload(client, SURVEY_KML).json()["id"]
     assert _paged(client, fid, "?limit=1000").status_code == 200
+
+
+# ---- unsupported geometry is handled gracefully (assignment section 3) ----
+
+
+def test_unsupported_kml_geometry_is_kept_without_geometry_and_never_a_500(client):
+    track = placemark("gps track", "<gx:Track><when>2026-01-01T00:00:00Z</when></gx:Track>")
+    data = kml(track + placemark("pin", "<Point><coordinates>1,1</coordinates></Point>")).replace(
+        b"<kml ", b'<kml xmlns:gx="http://www.google.com/kml/ext/2.2" ', 1
+    )
+    resp = upload(client, data)
+    assert resp.status_code == 201
+    assert any("Placemark 0" in w for w in resp.json()["warnings"])
+    first, second = client.get(f"/api/files/{resp.json()['id']}/measurements/").json()["features"]
+    assert first["geometry"] is None and first["measurement"]["reason"] == "no geometry"
+    assert second["geometry_type"] == "Point" and second["index"] == 1
+
+
+def test_geometry_collection_of_mixed_types_is_measured_by_type(client):
+    mixed = (
+        "<MultiGeometry><Point><coordinates>0,0</coordinates></Point>"
+        "<LineString><coordinates>0,0 1,0</coordinates></LineString>"
+        + polygon_kml("0,0 1,0 1,1 0,1 0,0")
+        + "</MultiGeometry>"
+    )
+    fid = upload(client, kml(placemark("mixed", mixed))).json()["id"]
+    feature = client.get(f"/api/files/{fid}/measurements/").json()["features"][0]
+    assert feature["geometry_type"] == "GeometryCollection"
+    assert feature["measurement"]["area_m2"] > 0 and feature["measurement"]["length_m"] > 0
