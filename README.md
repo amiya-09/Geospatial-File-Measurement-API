@@ -37,8 +37,9 @@ uvicorn app.main:app --port 8000
 - The SQLite file is `geo_api.db` in the directory you start the server from (SQLite also
   creates `geo_api.db-wal` and `geo_api.db-shm` next to it while running); set
   `GEO_API_DB=/path/to/file.db` to change it. Tables are created at startup.
-- Limits (upload size 25 MB, ZIP entries, feature and vertex counts, XML depth) are constants in
-  `app/config.py`; only the database path is read from the environment.
+- Limits (upload size 25 MB, uncompressed ZIP size 100 MB, ZIP entries, feature, vertex and part
+  counts, the size of a polygon that may be repaired, XML depth, concurrent uploads) are constants
+  in `app/config.py`; only the database path is read from the environment.
 
 Tests, lint and the end-to-end smoke check:
 
@@ -171,7 +172,9 @@ curl "http://127.0.0.1:8000/api/files/?limit=2"
 | 413 | `payload_too_large` | Body or file over `MAX_UPLOAD_BYTES` (25 MB). |
 | 415 | `unsupported_media_type` | Content is neither a zipped Shapefile nor KML. |
 | 422 | `validation_error` | Bad request (missing `file`, malformed UUID, paging out of range). |
-| 422 | `unmeasurable_file` | Readable but not measurable (e.g. no `.prj` and coordinates are not lon/lat). A `FAILED` record is stored; its id is `error.file_id`. |
+| 422 | `unmeasurable_file` | Readable but not measurable (e.g. no `.prj` and coordinates are not lon/lat; a feature spanning more than 180 degrees of longitude; an invalid polygon with more than 350 vertices; more than 20,000 parts after repair). A `FAILED` record is stored; its id is `error.file_id`. |
+| 503 | `server_busy` | Four uploads are already being processed and no slot freed up within 2 s. Nothing is stored; retry after the `Retry-After` seconds (5). |
+| 503 | `database_busy` | The database write lock or a pooled connection was not free within 5 s. Nothing is stored; retry after the `Retry-After` seconds (5). |
 | 500 | `internal_error` | Anything unexpected. Generic body; the traceback is only logged. |
 
 ```bash
@@ -224,35 +227,45 @@ plan.md              the agreed plan
    reading anything, and counts bytes for chunked bodies.
 2. **Read.** The route reads the upload in chunks and stops with 413 once `MAX_UPLOAD_BYTES`
    is exceeded.
-3. **Detect by content.** `PK\x03\x04` means zipped Shapefile; otherwise the KML parser runs.
+3. **Wait for a slot.** At most four uploads are parsed and measured at once. Another upload
+   waits up to 2 s for a slot, then gets 503 `server_busy`. Reads never wait for a slot.
+4. **Detect by content.** `PK\x03\x04` means zipped Shapefile; otherwise the KML parser runs.
    Well-formed XML that is not `<kml>` or unrecognised bytes give 415; broken ZIP/XML gives 400.
-4. **Parse.** Parsers return a `ParsedFile` (source CRS, features, warnings) or raise
+5. **Parse.** Parsers return a `ParsedFile` (source CRS, features, warnings) or raise
    `ParseError` (unreadable, 4xx, nothing stored) / `UnmeasurableError` (stored as `FAILED`, 422).
    - Shapefile ZIP: path-safety (zip-slip) checks, entry-count and size caps enforced on bytes
      actually read, encrypted entries rejected, exactly one shapefile required, `.prj` read for
-     the CRS, `.cpg` for the text encoding, DBF records flagged deleted are skipped.
+     the CRS, `.cpg` for the text encoding (only known text encodings; anything else is ignored
+     with a warning and UTF-8 is assumed), DBF records flagged deleted are skipped.
    - KML: DTDs and entities forbidden, nesting depth, feature and vertex limits; a Placemark
      with bad geometry becomes a feature with `geometry: null` and a warning.
-5. **Measure** each feature (next section).
-6. **Persist** the file row and all feature rows in one transaction.
-7. **Respond** with the file info (201). Failures after parsing store a `FAILED` record.
+   - Both: at most 20,000 lines and polygon rings per upload, counted before any geometry is
+     built (400 above that). A feature with a coordinate outside longitude +/-180 or latitude
+     +/-90 (KML, or a shapefile in a lon/lat CRS) is kept with `geometry: null` and a warning.
+6. **Measure** each feature (next section).
+7. **Persist** the file row and all feature rows in one transaction.
+8. **Respond** with the file info (201). Failures after parsing store a `FAILED` record.
 
 ## Measurement flow
 
 For each feature with geometry:
 
 1. Reproject from the source CRS to EPSG:4326 (lon/lat, `always_xy`), dropping Z/M.
-2. Reject non-finite coordinates and values outside lon/lat range.
-3. Check validity; an invalid polygon is repaired (`make_valid`) for measurement and reported
-   with `is_valid: false` and the reason.
-4. Split Multi* geometries into parts. For each part, build a local projection centred on the
-   part's centroid and project into it: **Lambert azimuthal equal-area** for area,
-   **azimuthal equidistant** for length.
-5. Antimeridian: a part spanning more than 180 degrees of longitude is retried with negative
+2. Reject non-finite coordinates and values outside lon/lat range (strictly, no tolerance).
+3. Split Multi* geometries and collections into parts, skipping empty parts.
+4. Antimeridian: a part spanning more than 180 degrees of longitude is retried with negative
    longitudes shifted by +360; if it still spans more than 180 degrees, or the shift would
    collapse it to zero size (a feature that goes all the way round the globe), the file is
    unmeasurable (422). A warning is recorded when the shift is applied.
-6. Measure in metres, sum the parts, and attach the unit and local CRS to each value.
+5. Check validity on the unwrapped parts. All polygons of one feature, including those inside a
+   mixed collection, are checked together, so overlapping members count as invalid. Invalid
+   polygons are repaired together (`make_valid` with the "structure" method, which unions
+   overlaps) and reported with `is_valid: false` and the reason. A warning gives both areas when
+   the repair changed the area. An invalid polygon with more than 350 vertices is not repaired;
+   the file is unmeasurable (422).
+6. For each part, build a local projection centred on the part's centroid and project into it:
+   **Lambert azimuthal equal-area** for area, **azimuthal equidistant** for length.
+7. Measure in metres, sum the parts, and attach the unit and local CRS to each value.
 
 ## CRS handling summary
 
@@ -269,6 +282,41 @@ For each feature with geometry:
 
 **TODO (author).**
 
+- An invalid polygon with more than 350 vertices (counted as stored, closing vertices included)
+  is not repaired, and the upload gets 422. Repair time grows sharply with the number of
+  self-crossings: a 350 vertex star polygon took about 1.5 s. The cap counts vertices, not
+  crossings, so a 10,000 vertex bow-tie that would repair in about 0.01 s is rejected too.
+- An upload may hold at most 20,000 lines and polygon rings (points do not count). They are
+  counted before geometry is built (400 above that) and again after repair (422).
+- A coordinate outside longitude +/-180 or latitude +/-90 drops that feature's geometry with a
+  warning (KML, or a shapefile in a lon/lat CRS). The upload is still 201, even when every
+  feature is dropped this way, for example a KML written in projected coordinates.
+- Polygons that share an edge or overlap inside one feature (a MultiPolygon or a mixed collection) are
+  reported invalid and measured as their union, with a warning when that changed the area.
+- A `.cpg` naming anything other than a known text encoding is ignored with a warning and UTF-8
+  is assumed. ESRI numeric ISO 8859 codes such as `88595` are not recognised.
+- At most four uploads are parsed and measured at once, in one process. The work is CPU bound
+  and shares one interpreter lock, so four slots bound memory and waiting time rather than add
+  speed. With 60 uploads of 1,500 polygons sent at once, 4 returned 201 and 56 returned 503
+  `server_busy` within 11.2 s, and `/health` answered in 8 ms (median) and 965 ms at worst.
+  Clients have to retry after `Retry-After`.
+- Peak memory is still roughly four times (25 MB upload, up to 100 MB of decompressed members,
+  and the geometries) while four uploads are processed.
+- A shapefile polygon with a one point ring fails the whole upload with 400 ("list index out of
+  range"), where other bad features only lose their own geometry.
+- `.prj` edge cases: an empty or whitespace only `.prj`, or a byte order mark before valid WKT,
+  gives 422, although a missing `.prj` falls back to EPSG:4326. A geocentric CRS such as
+  EPSG:4978 is accepted and gives meaningless results (a line measured 0 m at the north pole).
+- A few status codes are inconsistent: a ZIP with no `.shp` (a KMZ, say) is 400 rather than 415;
+  HTML is 400 with a DOCTYPE and 415 without one; a truncated KML is 400 in UTF-8 and 415 in
+  UTF-16; a multipart body without a boundary gives the code `http_error`, which the table above
+  does not list.
+- The measurements endpoint has no default page size, so one request returns every feature with
+  its geometry (up to 10,000 features).
+- Lines shorter than roughly half a millimetre measure exactly 0 m, because the azimuthal
+  equidistant projection snaps points that close to its centre.
+- A 405 response's `Allow` header lists the methods of the first matching route only:
+  `DELETE /api/files/` returns `Allow: POST`, although GET works on that path too.
 - mypy is not run in CI, and running it on `app/` reports 7 findings that are left as they are (shapely's type stubs are stricter than how the code calls shapely, pyshp ships no type stubs, and the shapefile reader types file contents as `bytes | None`).
 
 ## Design decisions and alternatives
