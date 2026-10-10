@@ -81,3 +81,12 @@ def test_unsupported_geometry_type_is_reported_not_raised():
 def test_coordinates_outside_lon_lat_range_raise_instead_of_returning_garbage(geom):
     with pytest.raises(MeasurementError):
         measure(geom)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_coordinates_raise_instead_of_passing_the_range_guard(bad):
+    # NaN compares False against every bound, so it must be rejected explicitly.
+    with pytest.raises(MeasurementError):
+        measure(Polygon([(0, 0), (1, 0), (1, bad), (0, 1)]))
+    with pytest.raises(MeasurementError):
+        measure(Point(bad, 1))

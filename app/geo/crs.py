@@ -12,6 +12,12 @@ from shapely.geometry.base import BaseGeometry
 WGS84 = CRS.from_epsg(4326)
 
 
+def crs_label(crs: CRS) -> str:
+    """ "EPSG:<code>" when pyproj resolves one, otherwise the CRS name."""
+    epsg = crs.to_epsg()
+    return f"EPSG:{epsg}" if epsg is not None else crs.name
+
+
 def _reproject(geom: BaseGeometry, transformer: Transformer) -> BaseGeometry:
     def apply(coords: np.ndarray) -> np.ndarray:
         x, y = transformer.transform(coords[:, 0], coords[:, 1])

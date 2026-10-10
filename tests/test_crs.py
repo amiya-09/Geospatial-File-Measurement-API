@@ -73,3 +73,20 @@ def test_project_local_returns_the_crs_it_used():
 def test_local_projections_normalise_lon_0_into_minus_180_180(lon, expected):
     assert f"+lon_0={expected} " in local_laea(lon=lon, lat=0.0).srs
     assert f"+lon_0={expected} " in local_aeqd(lon=lon, lat=0.0).srs
+
+
+def test_crs_label_prefers_the_epsg_code():
+    from app.geo.crs import crs_label
+
+    assert crs_label(CRS.from_epsg(4326)) == "EPSG:4326"
+    assert crs_label(CRS.from_epsg(32632)) == "EPSG:32632"
+    assert crs_label(CRS.from_wkt(CRS.from_epsg(4326).to_wkt(version="WKT1_ESRI"))) == "EPSG:4326"
+
+
+def test_crs_label_falls_back_to_the_crs_name_when_no_epsg_code_resolves():
+    from app.geo.crs import crs_label
+
+    custom = CRS.from_proj4("+proj=laea +lat_0=10 +lon_0=20 +datum=WGS84 +units=m +no_defs")
+    assert custom.to_epsg() is None
+    assert crs_label(custom) == custom.name
+    assert crs_label(custom)  # never empty

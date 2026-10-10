@@ -97,6 +97,10 @@ def _measure_parts(parts: list[BaseGeometry], kind: str) -> tuple[float, str, in
 def _check_lon_lat(geom: BaseGeometry) -> None:
     minx, miny, maxx, maxy = geom.bounds
     tol = _RANGE_TOLERANCE_DEG
+    # Bounds ignore NaN vertices and NaN compares False against every bound, so check the
+    # coordinates themselves.
+    if not np.isfinite(shapely.get_coordinates(geom)).all():
+        raise MeasurementError("coordinates are not finite numbers")
     if minx < -180 - tol or maxx > 180 + tol or miny < -90 - tol or maxy > 90 + tol:
         raise MeasurementError(
             f"coordinates are not valid lon/lat degrees (bounds: {minx}, {miny}, {maxx}, {maxy})"
