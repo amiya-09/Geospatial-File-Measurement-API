@@ -83,6 +83,7 @@ def test_coordinates_outside_lon_lat_range_raise_instead_of_returning_garbage(ge
         measure(geom)
 
 
+@pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
 def test_non_finite_coordinates_raise_instead_of_passing_the_range_guard(bad):
     # NaN compares False against every bound, so it must be rejected explicitly.
