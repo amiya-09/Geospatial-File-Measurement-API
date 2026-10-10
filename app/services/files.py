@@ -100,6 +100,14 @@ def parse_upload(data: bytes) -> tuple[str, ParsedFile]:
 def _measure_features(
     parsed: ParsedFile, file_id: str
 ) -> tuple[list[FeatureRecord], list[str], str]:
+    # Features whose geometry was dropped are kept, but a file with nothing left to measure is
+    # unmeasurable rather than a success full of empty features.
+    if parsed.features and all(f.geometry is None or f.geometry.is_empty for f in parsed.features):
+        first = f" (first warning: {parsed.warnings[0]})" if parsed.warnings else ""
+        raise MeasurementError(
+            f"none of the {len(parsed.features)} features has a usable geometry: coordinates "
+            f"were out of range or unusable{first}"
+        )
     warnings = list(parsed.warnings)
     rows: list[FeatureRecord] = []
     label = crs_label(parsed.crs)

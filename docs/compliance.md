@@ -80,7 +80,7 @@ was actually checked, on 2026-10-10 unless stated.
 | Multipart field name | Not named. | The upload must be the form field `file` | A field named `upload` returns 422. Since commit `a4e6944` the message names the expected field (`tests/test_api_files.py::test_missing_file_field_message_names_the_expected_field`) |
 | Status codes | None defined. | See "Status codes" below | n/a |
 | Processing limits | None defined. | `app/config.py`: upload 25 MB, uncompressed ZIP 100 MB, 100 ZIP entries, 10,000 features, 1,000,000 vertices, 20,000 lines and polygon rings, repair of invalid polygons up to 350 vertices, XML depth 50, four uploads processed at once | `tests/test_parser_limits.py::test_default_limits`; `tests/test_upload_slots.py::test_default_slot_settings`; the limit tests in `test_parser_limits.py`, `test_measure_repair.py` and `test_api_hostile.py` |
-| Coordinates outside lon/lat range | Not covered. | Strict check, no tolerance. KML, or a shapefile in a lon/lat CRS: that feature is kept with no geometry and a warning, and the upload is 201. A shapefile without `.prj` whose coordinates do not fit lon/lat stays unmeasurable (422) | `tests/test_coordinate_range.py` |
+| Coordinates outside lon/lat range | Not covered. | Strict check, no tolerance. KML, or a shapefile in a lon/lat CRS: that feature is kept with no geometry and a warning, and the rest of the file is stored (201). If no feature is left with a usable geometry, the file is unmeasurable (422, `FAILED` record). A shapefile without `.prj` whose coordinates do not fit lon/lat stays unmeasurable (422) | `tests/test_coordinate_range.py`; `test_api_files.py::test_kml_whose_only_feature_is_outside_lon_lat_is_422_with_a_failed_record`; `samples/bad_coordinates.kml` (422 in `scripts/smoke.sh`) |
 
 ## Yours to do
 
@@ -119,7 +119,7 @@ The assignment defines no status codes. This table is our own design.
 | Measurements of a FAILED file | 409 | `file_failed` | `::test_unmeasurable_shapefile_is_422_and_leaves_a_readable_failed_record` |
 | Over the upload cap | 413 | `payload_too_large` | `::test_upload_over_the_cap_is_413_and_nothing_is_persisted`; `test_body_limit.py` |
 | Unrecognised content | 415 | `unsupported_media_type` | `::test_png_renamed_kml_is_415_and_kml_renamed_png_is_accepted` |
-| Unmeasurable (FAILED record stored, `file_id` in body) | 422 | `unmeasurable_file` | `::test_unmeasurable_shapefile_is_422_...`; `test_api_antimeridian.py::test_feature_spanning_the_whole_circle_is_422_with_a_failed_record`; `::test_parts_created_by_repair_count_towards_the_upload_part_limit` |
+| Unmeasurable (FAILED record stored, `file_id` in body) | 422 | `unmeasurable_file` | `::test_unmeasurable_shapefile_is_422_...`; `test_api_antimeridian.py::test_feature_spanning_the_whole_circle_is_422_with_a_failed_record`; `::test_parts_created_by_repair_count_towards_the_upload_part_limit`; `::test_kml_whose_only_feature_is_outside_lon_lat_is_422_with_a_failed_record` |
 | Bad request (missing field, malformed UUID, paging out of range) | 422 | `validation_error` | `::test_malformed_id_is_a_422_in_the_error_shape`; `::test_measurements_paging_bounds_are_validated` |
 | Too many uploads in progress (nothing stored, `Retry-After: 5`) | 503 | `server_busy` | `test_upload_slots.py::test_upload_when_every_slot_is_taken_is_503_server_busy_and_stores_nothing` |
 | Database write lock or pooled connection not free within 5 s (nothing stored, `Retry-After: 5`) | 503 | `database_busy` | `test_db_busy.py` |

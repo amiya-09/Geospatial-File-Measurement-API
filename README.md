@@ -172,7 +172,7 @@ curl "http://127.0.0.1:8000/api/files/?limit=2"
 | 413 | `payload_too_large` | Body or file over `MAX_UPLOAD_BYTES` (25 MB). |
 | 415 | `unsupported_media_type` | Content is neither a zipped Shapefile nor KML. |
 | 422 | `validation_error` | Bad request (missing `file`, malformed UUID, paging out of range). |
-| 422 | `unmeasurable_file` | Readable but not measurable (e.g. no `.prj` and coordinates are not lon/lat; a feature spanning more than 180 degrees of longitude; an invalid polygon with more than 350 vertices; more than 20,000 parts after repair). A `FAILED` record is stored; its id is `error.file_id`. |
+| 422 | `unmeasurable_file` | Readable but not measurable (e.g. no `.prj` and coordinates are not lon/lat; a feature spanning more than 180 degrees of longitude; an invalid polygon with more than 350 vertices; more than 20,000 parts after repair; no feature left with a usable geometry). A `FAILED` record is stored; its id is `error.file_id`. |
 | 503 | `server_busy` | Four uploads are already being processed and no slot freed up within 2 s. Nothing is stored; retry after the `Retry-After` seconds (5). |
 | 503 | `database_busy` | The database write lock or a pooled connection was not free within 5 s. Nothing is stored; retry after the `Retry-After` seconds (5). |
 | 500 | `internal_error` | Anything unexpected. Generic body; the traceback is only logged. |
@@ -242,6 +242,8 @@ plan.md              the agreed plan
    - Both: at most 20,000 lines and polygon rings per upload, counted before any geometry is
      built (400 above that). A feature with a coordinate outside longitude +/-180 or latitude
      +/-90 (KML, or a shapefile in a lon/lat CRS) is kept with `geometry: null` and a warning.
+   - If the file has features but none of them is left with a usable geometry, the file is
+     unmeasurable (422, `FAILED` record). Files with some usable features are stored as usual.
 6. **Measure** each feature (next section).
 7. **Persist** the file row and all feature rows in one transaction.
 8. **Respond** with the file info (201). Failures after parsing store a `FAILED` record.
@@ -289,8 +291,10 @@ For each feature with geometry:
 - An upload may hold at most 20,000 lines and polygon rings (points do not count). They are
   counted before geometry is built (400 above that) and again after repair (422).
 - A coordinate outside longitude +/-180 or latitude +/-90 drops that feature's geometry with a
-  warning (KML, or a shapefile in a lon/lat CRS). The upload is still 201, even when every
-  feature is dropped this way, for example a KML written in projected coordinates.
+  warning (KML, or a shapefile in a lon/lat CRS), and the rest of the file is stored (201). When
+  no feature is left with a usable geometry, for example a KML written in projected coordinates,
+  the upload is 422. The same applies to a KML whose Placemarks carry no geometry at all, while
+  a KML with no Placemarks is still 201 with zero features.
 - Polygons that share an edge or overlap inside one feature (a MultiPolygon or a mixed collection) are
   reported invalid and measured as their union, with a warning when that changed the area.
 - A `.cpg` naming anything other than a known text encoding is ignored with a warning and UTF-8
