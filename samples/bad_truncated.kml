@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document><name>Sample</name>
+  <Placemark><name>Viewpoint</name><Point><coordinates>13.4050,52.5200,34</coordinates></Point></Placemark>
+  <Placemark><name>Footpath</name><LineString><coordinates>13.40,52.52 13.41,52.52 13.41,52.53</coordinates></LineString></Placemark>
+  <Placemark><name>Park with pond</name><Polygon><outerBoundaryIs><LinearRing><coordinates>13.40,52.50 13.42,52.50 13.42,52.51 
