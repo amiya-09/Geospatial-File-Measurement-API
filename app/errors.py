@@ -37,6 +37,18 @@ def _body(code: str, message: str, **extra: Any) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, **extra}}
 
 
+_MISSING_UPLOAD = (
+    'missing required multipart form field "file": send the upload as a form field named '
+    '"file", for example curl -F "file=@samples/sample.kml"'
+)
+
+
+def _describe(err: dict[str, Any]) -> str:
+    if tuple(err["loc"]) == ("body", "file") and err["type"] == "missing":
+        return _MISSING_UPLOAD
+    return f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def api_error(_: Request, exc: ApiError) -> JSONResponse:
@@ -45,9 +57,7 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
         # Locations and messages only; never echo the offending input back.
-        problems = "; ".join(
-            f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()
-        )
+        problems = "; ".join(_describe(err) for err in exc.errors())
         return JSONResponse(_body("validation_error", problems), status_code=422)
 
     @app.exception_handler(StarletteHTTPException)

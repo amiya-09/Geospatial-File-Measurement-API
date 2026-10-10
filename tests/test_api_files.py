@@ -488,3 +488,31 @@ def test_geometry_collection_of_mixed_types_is_measured_by_type(client):
     feature = client.get(f"/api/files/{fid}/measurements/").json()["features"][0]
     assert feature["geometry_type"] == "GeometryCollection"
     assert feature["measurement"]["area_m2"] > 0 and feature["measurement"]["length_m"] > 0
+
+
+# ---- the 422 for a missing upload says which field is expected ----
+
+
+@pytest.mark.parametrize(
+    "send",
+    [
+        lambda c: c.post("/api/files/", files={"upload": ("a.kml", b"<kml/>")}),
+        lambda c: c.post("/api/files/", data={"other": "x"}),
+        lambda c: c.post(
+            "/api/files/", content=b"<kml/>", headers={"content-type": "application/xml"}
+        ),
+    ],
+    ids=["wrong field name", "no file part", "not multipart"],
+)
+def test_missing_file_field_message_names_the_expected_field(client, send):
+    resp = send(client)
+    assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert error["code"] == "validation_error"
+    assert 'multipart form field "file"' in error["message"]
+    assert '-F "file=@' in error["message"]
+
+
+def test_other_validation_messages_are_unchanged(client):
+    resp = client.get("/api/files/not-a-uuid/")
+    assert resp.json()["error"]["message"].startswith("path.file_id: ")
