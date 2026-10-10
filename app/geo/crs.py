@@ -26,10 +26,26 @@ def _reproject(geom: BaseGeometry, transformer: Transformer) -> BaseGeometry:
     return shapely.transform(geom, apply)
 
 
-def to_wgs84(geom: BaseGeometry, source_crs: CRS) -> BaseGeometry:
-    """Reproject to EPSG:4326 (lon, lat), dropping Z/M. Always done, even for projected sources."""
+def wgs84_transformer(source_crs: CRS) -> Transformer:
+    """Transformer from ``source_crs`` to EPSG:4326 (lon, lat).
+
+    Building one can take about 30 ms (a .prj without an authority code), so callers build it
+    once per file and pass it to ``to_wgs84`` for every feature.
+    """
+    return Transformer.from_crs(source_crs, WGS84, always_xy=True)
+
+
+def to_wgs84(
+    geom: BaseGeometry, source_crs: CRS, transformer: Transformer | None = None
+) -> BaseGeometry:
+    """Reproject to EPSG:4326 (lon, lat), dropping Z/M. Always done, even for projected sources.
+
+    ``transformer`` is ``wgs84_transformer(source_crs)``, built once by the caller; without it
+    one is built for this call.
+    """
     geom = shapely.force_2d(geom)
-    transformer = Transformer.from_crs(source_crs, WGS84, always_xy=True)
+    if transformer is None:
+        transformer = wgs84_transformer(source_crs)
     return _reproject(geom, transformer)
 
 

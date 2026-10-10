@@ -14,7 +14,7 @@ from app import config
 from app.db import repository
 from app.db.models import FeatureRecord, FileRecord
 from app.errors import RETRY_AFTER_SECONDS, ApiError
-from app.geo.crs import crs_label, to_wgs84
+from app.geo.crs import crs_label, to_wgs84, wgs84_transformer
 from app.geo.measure import MeasurementError, measure
 from app.parsers.base import ParsedFile, ParseError, UnmeasurableError
 from app.parsers.kml import NotKmlError, parse_kml
@@ -112,6 +112,7 @@ def _measure_features(
     rows: list[FeatureRecord] = []
     label = crs_label(parsed.crs)
     parts_measured = 0
+    transformer = None  # built at the first geometry, then reused for every feature
     for feature in parsed.features:
         geometry = geometry_type = None
         measurement: dict[str, Any]
@@ -120,7 +121,9 @@ def _measure_features(
             is_valid, validity_reason, feature_warnings = True, None, []
         else:
             try:
-                wgs84 = to_wgs84(feature.geometry, parsed.crs)
+                if transformer is None:
+                    transformer = wgs84_transformer(parsed.crs)
+                wgs84 = to_wgs84(feature.geometry, parsed.crs, transformer)
                 result = measure(wgs84)
                 geometry = to_geojson(wgs84)
             except (MeasurementError, ProjError) as exc:

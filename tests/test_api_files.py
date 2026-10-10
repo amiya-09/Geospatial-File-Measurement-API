@@ -1,6 +1,6 @@
 import pytest
 import shapefile  # noqa: E402  (grouped with the helpers above on purpose)
-from pyproj import Geod
+from pyproj import CRS, Geod, Transformer
 from sqlalchemy import func, select
 
 from app import config
@@ -141,6 +141,29 @@ def test_zipped_shapefile_in_utm_is_reprojected_to_wgs84_in_the_response(client)
     assert box["measurement"]["area_unit"] == "m2"
     assert hole["geometry"] is None and hole["measurement"]["reason"] == "no geometry"
     assert any("null shape" in w for w in info["warnings"])
+
+
+def test_one_wgs84_transformer_is_built_per_upload_not_per_feature(client, monkeypatch):
+    # Building one from an ESRI style .prj took about 28 ms, so building one per feature added
+    # up to minutes for 10,000 features.
+    built, real, wgs84 = [], Transformer.from_crs, CRS.from_epsg(4326)
+
+    def spy(source, target, **kwargs):
+        if CRS(target) == wgs84:
+            built.append(source)
+        return real(source, target, **kwargs)
+
+    def build(w):
+        for i in range(3):
+            x = 500_000 + i * 1_000
+            w.poly([[(x, 5e6), (x, 5e6 + 100), (x + 100, 5e6 + 100), (x + 100, 5e6), (x, 5e6)]])
+            w.record(f"box {i}")
+
+    parts = shapefile_parts(build, shapefile.POLYGON)
+    zipped = shapefile_zip(parts, prj=CRS.from_epsg(32632).to_wkt())
+    monkeypatch.setattr(Transformer, "from_crs", spy)
+    assert upload(client, zipped).json()["feature_count"] == 3
+    assert len(built) == 1
 
 
 def test_shapefile_without_prj_but_with_lon_lat_coordinates_succeeds_with_a_warning(client):
