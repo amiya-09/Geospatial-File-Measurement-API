@@ -66,7 +66,10 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _HTTP_CODES.get(exc.status_code, "http_error")
-        return JSONResponse(_body(code, str(exc.detail)), status_code=exc.status_code)
+        # Keep headers Starlette sets, e.g. Allow on a 405 (required by RFC 9110).
+        return JSONResponse(
+            _body(code, str(exc.detail)), status_code=exc.status_code, headers=exc.headers
+        )
 
     # SQLite allows one writer at a time. Under heavy load a request can wait too long for the
     # write lock or for a free pooled connection. That is the server being busy, not a bug, so
