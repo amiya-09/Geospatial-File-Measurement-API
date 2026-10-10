@@ -1,6 +1,7 @@
 import logging
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.errors import ApiError
@@ -58,6 +59,29 @@ def test_wrong_method_lists_every_allowed_method_in_the_allow_header():
         assert resp.status_code == 405
         assert resp.headers["allow"] == "GET, POST"
         assert resp.json()["error"]["code"] == "method_not_allowed"
+
+
+MANY_FILE_PARTS = b"".join(
+    f'--zz\r\nContent-Disposition: form-data; name="f{i}"; filename="a"\r\n\r\nx\r\n'.encode()
+    for i in range(1001)
+)
+
+
+@pytest.mark.parametrize(
+    ("content_type", "body"),
+    [
+        ("multipart/form-data", b"xx"),
+        ("multipart/form-data; boundary=zz", b"--zz\r\nnot a header\r\n\r\nabc\r\n--zz--\r\n"),
+        ("multipart/form-data; boundary=zz", MANY_FILE_PARTS + b"--zz--\r\n"),
+    ],
+    ids=["no boundary", "broken body", "1001 file parts"],
+)
+def test_a_multipart_body_starlette_cannot_parse_is_400_invalid_request(client, content_type, body):
+    # These used to get the code http_error, which the README's error table does not list.
+    resp = client.post("/api/files/", content=body, headers={"content-type": content_type})
+    assert resp.status_code == 400
+    error_shape(resp.json())
+    assert resp.json()["error"]["code"] == "invalid_request"
 
 
 def test_fastapi_validation_errors_use_the_error_shape_without_echoing_input():

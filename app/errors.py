@@ -17,7 +17,9 @@ from app.db.session import BUSY_TIMEOUT_MS
 logger = logging.getLogger("app")
 
 RETRY_AFTER_SECONDS = str(BUSY_TIMEOUT_MS // 1000)
-_HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
+# Starlette and FastAPI raise a 400 only for a request body they cannot parse (for example a
+# multipart body without a boundary, a broken one, or more than 1,000 parts).
+_HTTP_CODES = {400: "invalid_request", 404: "not_found", 405: "method_not_allowed"}
 
 
 class ErrorDetail(BaseModel):
