@@ -16,7 +16,7 @@ libraries are needed: every dependency installs from a pip wheel. `requirements.
 exact versions the test suite passed with, so install from it:
 
 ```bash
-git clone <repository-url> geo-measure-api && cd geo-measure-api
+git clone https://github.com/amiya-09/Geospatial-File-Measurement-API geo-measure-api && cd geo-measure-api
 python -m venv .venv      # use python3 if `python` is not on your PATH
 . .venv/bin/activate
 pip install -r requirements.lock
