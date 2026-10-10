@@ -33,11 +33,14 @@ class Measurement:
 
 
 def _parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
-    """Flatten Multi* and GeometryCollection into simple geometries."""
+    """Flatten Multi* and GeometryCollection into simple, non-empty geometries.
+
+    Empty parts are skipped: their bounds are NaN, which passes every span comparison.
+    """
     if hasattr(geom, "geoms"):
         for part in geom.geoms:
             yield from _parts(part)
-    else:
+    elif not geom.is_empty:
         yield geom
 
 
@@ -74,16 +77,16 @@ def _unwrap_antimeridian(part: BaseGeometry) -> tuple[BaseGeometry, bool]:
             f"feature spans more than 180 degrees of longitude ({min(span, alt_span):.1f}) "
             "even after unwrapping the antimeridian; it cannot be unwrapped or measured"
         )
-    if alt_span < span:
-        # -180 and 180 are the same meridian, so a feature that goes all the way round
-        # collapses to nothing when shifted. Never trade a real feature for an empty one.
-        if _degree_measure(alternative) == 0 and _degree_measure(part) > 0:
-            raise MeasurementError(
-                "feature spans more than 180 degrees of longitude and collapses to zero "
-                "size when unwrapped across the antimeridian; it cannot be unwrapped or measured"
-            )
-        return alternative, True
-    return part, False
+    # Now span > 180 >= alt_span (parts are non-empty with finite coordinates, so both spans
+    # are real numbers): the shifted part is the narrower one. -180 and 180 are the same
+    # meridian, so a feature that goes all the way round collapses to nothing when shifted.
+    # Never trade a real feature for an empty one.
+    if _degree_measure(alternative) == 0 and _degree_measure(part) > 0:
+        raise MeasurementError(
+            "feature spans more than 180 degrees of longitude and collapses to zero "
+            "size when unwrapped across the antimeridian; it cannot be unwrapped or measured"
+        )
+    return alternative, True
 
 
 def _measure_parts(parts: Sequence[BaseGeometry], kind: str) -> tuple[float, str]:

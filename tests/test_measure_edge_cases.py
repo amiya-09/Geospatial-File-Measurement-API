@@ -1,6 +1,6 @@
 import pytest
 from pyproj import Geod
-from shapely.geometry import LinearRing, LineString, Point, Polygon
+from shapely.geometry import GeometryCollection, LinearRing, LineString, Point, Polygon, box
 
 from app.geo.measure import MeasurementError, measure
 from tests import expected_values as ev
@@ -62,6 +62,15 @@ def test_empty_polygon_is_reported_not_raised():
     assert m.area_m2 is None and m.length_m is None
     assert m.reason == "empty geometry"
     assert m.is_valid is True
+
+
+@pytest.mark.parametrize("empty", [Polygon(), LineString()], ids=["empty-polygon", "empty-line"])
+def test_an_empty_part_inside_a_collection_is_skipped(empty):
+    # An empty part has NaN bounds; it used to reach the projection and crash measure().
+    m = measure(GeometryCollection([empty, box(0, 0, 1, 1), LineString([(0, 0), (1, 0)])]))
+    assert m.area_m2 == pytest.approx(geod_area([(0, 0), (1, 0), (1, 1), (0, 1)]), rel=0.001)
+    assert m.length_m == pytest.approx(measure(LineString([(0, 0), (1, 0)])).length_m)
+    assert m.part_count == 2
 
 
 def test_unsupported_geometry_type_is_reported_not_raised():
