@@ -6,7 +6,6 @@ Upload a zipped Shapefile or a KML file; the API extracts every feature and meas
 FastAPI, SQLAlchemy + SQLite, shapely 2, pyproj, pyshp, defusedxml. No GDAL, GeoPandas, fiona
 or pyogrio.
 
-> Sections marked **TODO (author)** are left for the author to write.
 > Requirement-by-requirement status (tests, gaps, mismatches): [Requirements traceability](docs/compliance.md).
 
 ## Setup
@@ -280,32 +279,215 @@ For each feature with geometry:
 - Accuracy limits: straight edges are projected, not geodesic, so very large shapes differ
   slightly from a geodesic calculation (a 10-degree box: about -0.4% area).
 
+## How I built this
+
+I built this project in phases using Claude Code, Anthropic's AI coding agent. Claude Code wrote
+the code and the tests. It also drafted the documentation, including this section. I gave the
+instructions for each stage and chose between the options it reported. I reviewed each stage
+report before moving on. [AMIYA: anything you wrote or changed by hand.]
+
+The work went in this order:
+
+1. A written plan first. `plan.md` holds the requirements checklist, the architecture, the
+   projection strategy, the main risks and the failure policy. Before any code I added the
+   failure policy, the `warnings` and `is_valid` fields and the exact route paths to it.
+2. Reference values before measurement code. `tests/expected_values.py` holds areas and lengths
+   computed only with `pyproj.Geod`, and it was committed before any measuring code existed.
+3. Five stages, each ending with a written report and a stop: the measurement core, the two
+   parsers, the API with SQLite storage, hardening (the body size limit, paging, sample files and
+   a smoke script), and last a requirements matrix (`docs/compliance.md`), an independent check
+   script, CI and a run from a fresh clone. Each report showed the real test output and listed
+   the decisions still open. Where a report offered options, I picked one, for example
+   unwrapping features that cross the antimeridian instead of rejecting them.
+4. A finishing round: an audit of the CRS handling against Geod, load and fuzz testing with
+   fixes, a read only security and code review by two separate Claude Code agents, a fix round
+   for the findings I approved, this writing pass, and a final check from a fresh clone of the
+   public repository before submission.
+
+How the work was checked:
+
+- Tests first. For new behaviour and for bug fixes, the test was written and seen to fail
+  before the code changed. A few tests that pinned behaviour already in place passed at once.
+  The suite has 418 tests and runs in CI on Python 3.11 and 3.12.
+- A mutation test, `tests/test_parser_totality.py`. It takes valid KML files and shapefile ZIPs,
+  corrupts them in seeded random ways (truncated, flipped, inserted, deleted and overwritten
+  bytes), and checks that the parsers either return a result or raise one of their own errors
+  within 5 s. It found four bugs that would have been 500s, and its long run (20,000 mutations
+  per target) passes.
+- An independent check against `pyproj.Geod`. `scripts/verify_independent.py` imports nothing
+  from `app`. It recomputes every sample feature with Geod and compares that with what the
+  running API returns. All five measurable sample features agree within 0.0000%.
+- Property tests with hypothesis (for example, a polygon's area does not change with its
+  starting vertex or ring direction), and a schemathesis run against the OpenAPI schema, which
+  found one 500 (an `offset` of 2^63) and a missing `Allow` header.
+
+[AMIYA: a sentence or two of your own on working this way.]
+
+## Design decisions and alternatives
+
+The full log, with the numbers behind each entry, is in [docs/decisions.md](docs/decisions.md).
+In short:
+
+Projection. I measure area in a Lambert azimuthal equal-area projection and length in an
+azimuthal equidistant projection. The code builds one for every part of every feature, centred on
+that part's centroid, and sums the parts. LAEA keeps area and AEQD keeps distances from its
+centre. I rejected one projection for everything, such as Web Mercator, which makes a 1 degree
+box at 60N about four times too big. Large shapes are where it breaks: a 10 degree box comes out
+0.38% smaller than Geod's answer, because my edges are straight lines in the projection and
+Geod's are geodesics.
+
+Reprojection. Every geometry goes through EPSG:4326 first, even from a projected file, with
+`always_xy=True` on every transformer. I do not measure a projected file in its own units. The
+NAD83 to WGS84 step is approximate (about 4 m), which changed a test box's area by about
+0.00003%.
+
+Libraries. I use pyshp for shapefiles and my own KML parser on defusedxml, instead of GDAL based
+readers such as pyogrio or fiona, so that everything installs from pip wheels. The cost is fewer
+formats and my own ZIP handling. pyshp still turns a polygon ring with one point into a 400 for
+the whole file.
+
+Failure policy. An unreadable file is a 4xx and nothing is stored. A readable file that cannot be
+measured is stored as `FAILED` and answered with 422 and its id. A problem in one feature only
+removes that feature's geometry, with a warning, and a file with no usable geometry left is a
+422. I do not guess a missing CRS. The weak spot is that a feature that fails during measurement
+still fails the whole file.
+
+Missing `.prj`. EPSG:4326 is assumed, with a warning, only when every coordinate fits lon/lat;
+otherwise the file is a 422. I rejected refusing all such files. The fallback cannot tell degrees
+from small projected numbers: a 40 m square drawn near 10,10 in a local CRS is read as degrees.
+
+Processing inside the request. Uploads are processed while the client waits, at most four at a
+time. The next one waits up to 2 s and then gets 503 `server_busy`. I rejected background jobs
+for now. In a burst of 60 uploads, 56 clients have to retry.
+
+Antimeridian. A part wider than 180 degrees of longitude is retried with negative longitudes
+shifted by +360. The narrower version wins, with a warning, and if both are wider than 180
+degrees the file is a 422. Rather than reject such features, I unwrap them. The rule cannot know
+what was meant: a box from -170 to 170 is read as 20 degrees wide across 180.
+
+Invalid polygons. The polygons of one feature are checked and repaired together with
+`make_valid` (the "structure" method), flagged with `is_valid: false`, and refused above 350
+vertices. The cap trades away some cheap repairs, such as a 10,000 vertex bow tie, to keep the
+worst repair near 1.5 s.
+
+## Learnings
+
+[AMIYA: an opening sentence or two of your own.]
+
+Degrees are not metres. A 1 by 1 degree box covers about 12,309 km2 at the equator and about
+6,123 km2 at 60N, because a degree of longitude covers less ground away from the equator. A
+calculation done directly on longitude and latitude gives both boxes the same number. That is
+why nothing in this API is measured in degrees.
+
+Coordinates mean nothing without their CRS. `391390, 5817855` is a corner of the sample park in
+Berlin in UTM zone 33N, and a different place in another CRS. So when a shapefile has no `.prj`,
+the API does not guess, unless every number fits the lon/lat range.
+
+Each projection keeps some properties and gives up others. Web Mercator is good for web maps but
+does not keep area. LAEA keeps area and AEQD keeps distances from its centre, so I use one for
+each. The projection also has to sit near the shape: an AEQD map centred on Berlin would give an
+inaccurate length for a footpath in Sydney.
+
+A reference should not share my method. If my reference used the same kind of projection as
+my code, both could share the same distortion or the same bug. `pyproj.Geod` works on the WGS84
+ellipsoid instead, so agreement with it means more. The comparison still needs a tolerance,
+because projected and geodesic results differ for large shapes. The worst bug the review found
+(+2197%) was measured against Geod.
+
+A file's description of itself cannot be trusted. A ZIP header can claim that an entry is 10
+bytes when it unpacks to 5 GB. The parser reads at most the remaining budget plus one byte, and
+if that extra byte arrives, the archive is over the limit and is rejected.
+
+Bad input must not become a 500. The mutation test found that an XML declaration with an unknown
+encoding raised an uncaught `LookupError`. The fault was in the input, not in the server, so it
+is now a 400.
+
+Order matters in a pipeline. My first version checked and repaired polygons before unwrapping
+them across the antimeridian. A wrapped box together with a small box at longitude 10 then
+measured 2197% too large.
+
+The worst case needs its own limit. Repairing a self intersecting polygon is fast for most
+shapes, but a star with 141 vertices took about 30 s. The 350 vertex cap applies only to invalid
+polygons that need repair, so a valid coastline with 50,000 vertices is still measured. The
+price is that the cap can also reject an invalid polygon that would have been cheap to repair.
+
+A fast endpoint can still be slow under load. `/health` does almost no work, yet it took 27 s
+while uploads were waiting, because it needed a free worker thread and the uploads held them. As
+an `async` function it answers on the event loop instead, in 7.9 ms (median) during a burst of 60
+uploads. The uploads did not get faster, since parsing and measuring are CPU bound. The four
+upload slots only limit how many run at once.
+
+Partial success needs a rule for when nothing is left. A KML with a valid polygon, a polygon
+with a corner at latitude 95 and a Placemark without geometry is a 201: the first is measured,
+and the other two are kept with `geometry: null` and a warning. Without the valid polygon the
+same file is a 422, because no feature has a usable geometry.
+
+[AMIYA: what you would do differently next time.]
+
 ## Known limitations and deviations
 
-**TODO (author).**
+The M numbers refer to the mismatch table in [docs/compliance.md](docs/compliance.md).
 
-- An invalid polygon with more than 350 vertices (counted as stored, closing vertices included)
-  is not repaired, and the upload gets 422. Repair time grows sharply with the number of
-  self-crossings: a 350 vertex star polygon took about 1.5 s. The cap counts vertices, not
-  crossings, so a 10,000 vertex bow-tie that would repair in about 0.01 s is rejected too.
+Where the API differs from the assignment or from `plan.md`:
+
+- The plan says a file goes from `PROCESSING` to `COMPLETED` or `FAILED`. Processing happens
+  inside the request, so `PROCESSING` is never stored or returned (M3).
+- The plan says a point gets `measurement: null` with a reason. The API returns a `measurement`
+  object whose values are all `null`, with `reason` set (`"not applicable"`, `"unsupported"`,
+  `"no geometry"`), so every feature has the same shape (M4).
+- Ids are UUID strings. The assignment's example shows `"abc123"`: the same type, a different
+  value (M5).
+- The assignment does not define the measurements response. It is an object
+  `{file_id, crs, total, limit, offset, features}`, not a bare list (M6).
+- `created_at` is returned only by the list endpoint, not by the file details, because I kept the
+  file details to the assignment's example (M12).
+
+Limits and known problems:
+
+- The 25 MB cap is checked on the bytes read and by the body middleware, but Starlette writes the
+  multipart body to a temporary file before the route runs. So a request of up to 25 MB plus
+  64 KiB reaches the disk before the cap applies (M11).
+- The body middleware has a sharp edge. When a chunked upload (no `Content-Length`) passes the
+  limit, it cannot simply raise an error, because FastAPI turns that exception into a 400 (seen
+  in Stage D). Instead it tells the app that the client disconnected, throws away whatever the app
+  sends, and sends its own 413. It can only do that if the app has not started its response yet. The upload
+  route never answers before the whole body is read, but a route that did would send a cut off
+  response (read from the code, not tested). The middleware's limit is 64 KiB above
+  `MAX_UPLOAD_BYTES`, to leave room for the multipart headers, so its 413 names 26,279,936 bytes
+  while the route's 413 names 26,214,400. A `Content-Length` that is not a number is passed on to
+  the server unchanged.
+- A feature that fails during measurement (wider than 180 degrees of longitude, invalid polygons
+  with more than 350 vertices, more than 20,000 parts after repair) fails the whole file with
+  422, while a feature the parsers cannot read only loses its own geometry.
+- A feature whose polygons are invalid and hold more than 350 vertices in total (counted as
+  stored, closing vertices included) is not repaired, and the upload gets 422. Repair time grows
+  sharply with the number of self crossings: a 350 vertex star polygon took about 1.5 s. The cap
+  counts vertices, not crossings, so a 10,000 vertex bow tie that would repair in about 0.01 s is
+  rejected too.
 - An upload may hold at most 20,000 lines and polygon rings (points do not count). They are
   counted before geometry is built (400 above that) and again after repair (422).
 - A coordinate outside longitude +/-180 or latitude +/-90 drops that feature's geometry with a
   warning (KML, or a shapefile in a lon/lat CRS), and the rest of the file is stored (201). When
   no feature is left with a usable geometry, for example a KML written in projected coordinates,
-  the upload is 422. The same applies to a KML whose Placemarks carry no geometry at all, while
-  a KML with no Placemarks is still 201 with zero features.
-- Polygons that share an edge or overlap inside one feature (a MultiPolygon or a mixed collection) are
-  reported invalid and measured as their union, with a warning when that changed the area.
+  the upload is 422. The same applies to a KML whose Placemarks carry no geometry at all, while a
+  KML with no Placemarks is still 201 with zero features.
+- A feature written with continuous longitudes past 180 (179 to 181) counts as out of range, so
+  it loses its geometry. Only the wrapped form (179 to -179) is measured across the antimeridian.
+- Without a `.prj`, a shapefile whose numbers all fit lon/lat is read as degrees, even if it is
+  really in a projected CRS. A 40 m by 40 m square with corners at 10,10 and 50,50 measured
+  16,039,424,623,573 m2, with only a warning (checked with a scratch script, not a committed
+  test).
+- Polygons that share an edge or overlap inside one feature (a MultiPolygon or a mixed collection)
+  are reported invalid and measured as their union, with a warning when that changed the area.
 - A `.cpg` naming anything other than a known text encoding is ignored with a warning and UTF-8
   is assumed. ESRI numeric ISO 8859 codes such as `88595` are not recognised.
-- At most four uploads are parsed and measured at once, in one process. The work is CPU bound
-  and shares one interpreter lock, so four slots bound memory and waiting time rather than add
-  speed. With 60 uploads of 1,500 polygons sent at once, 4 returned 201 and 56 returned 503
-  `server_busy` within 11.2 s, and `/health` answered in 8 ms (median) and 965 ms at worst.
-  Clients have to retry after `Retry-After`.
-- Peak memory is still roughly four times (25 MB upload, up to 100 MB of decompressed members,
-  and the geometries) while four uploads are processed.
+- At most four uploads are parsed and measured at once, in one process. With 60 uploads of 1,500
+  polygons sent at once, 4 returned 201 and 56 returned 503 `server_busy` within 11.2 s, and
+  `/health` answered in 8 ms (median) and 965 ms at worst. More slots would not add speed: each
+  of the four accepted uploads took up to 11 s, against 1.93 s for one upload alone. Clients have
+  to retry after `Retry-After`.
+- Peak memory is still roughly four times one upload (25 MB upload, up to 100 MB of
+  decompressed members, and the geometries) while four uploads are processed.
 - A shapefile polygon with a one point ring fails the whole upload with 400 ("list index out of
   range"), where other bad features only lose their own geometry.
 - `.prj` edge cases: an empty or whitespace only `.prj`, or a byte order mark before valid WKT,
@@ -313,22 +495,39 @@ For each feature with geometry:
   EPSG:4978 is accepted and gives meaningless results (a line measured 0 m at the north pole).
 - A few status codes are inconsistent: a ZIP with no `.shp` (a KMZ, say) is 400 rather than 415;
   HTML is 400 with a DOCTYPE and 415 without one; a truncated KML is 400 in UTF-8 and 415 in
-  UTF-16; a multipart body without a boundary gives the code `http_error`, which the table above
-  does not list.
+  UTF-16; a multipart body without a boundary gives the code `http_error`, which the error table
+  above does not list.
 - The measurements endpoint has no default page size, so one request returns every feature with
   its geometry (up to 10,000 features).
-- Lines shorter than roughly half a millimetre measure exactly 0 m, because the azimuthal
-  equidistant projection snaps points that close to its centre.
-- mypy is not run in CI, and running it on `app/` reports 7 findings that are left as they are (shapely's type stubs are stricter than how the code calls shapely, pyshp ships no type stubs, and the shapefile reader types file contents as `bytes | None`).
-
-## Design decisions and alternatives
-
-**TODO (author).** See `docs/decisions.md` for the skeleton.
-
-## Learnings
-
-**TODO (author).**
+- Large polygons come out slightly smaller than a geodesic calculation, because edges are
+  straight in the local projection: about -0.38% for a 10 degree box and -1.5% for a 20 degree
+  box at the equator (see `docs/accuracy.md`).
+- Lines shorter than roughly half a millimetre measure exactly 0 m.
+- There is no authentication and no delete route, so `FAILED` records and uploads stay in the
+  database.
+- mypy is not run in CI, and running it on `app/` reports 7 findings that are left as they are
+  (shapely's type stubs are stricter than how the code calls shapely, pyshp ships no type stubs,
+  and the shapefile reader types file contents as `bytes | None`).
 
 ## Future scope
 
-**TODO (author).**
+- Background processing: store a `PROCESSING` record, answer at once and measure in a worker, so
+  a large upload does not hold a request open (this would also remove M3).
+- Real parallelism: several server worker processes, or measuring in a separate process with a
+  time limit. Four slots in one process limit the load but add no speed.
+- Faster measuring: a part costs about 0.7 ms of CPU, and each part builds a new pyproj
+  transformer. Reusing transformers may cut that (not measured).
+- A repair limit based on the number of self crossings instead of vertices, so that cheap
+  repairs such as a large bow tie are accepted.
+- Geodesic edges: cut long polygon edges into short pieces before projecting, so that large
+  polygons agree with Geod's reading of an edge.
+- KMZ uploads (a zipped KML) and several shapefiles in one ZIP, measured as separate layers
+  instead of rejected.
+- A default page size for measurements.
+- The smaller fixes listed above: catch the one point ring per feature, treat an empty or BOM
+  prefixed `.prj` as missing, require a geographic or projected CRS, accept ESRI numeric `.cpg`
+  codes, and make the 400 and 415 cases consistent.
+- Authentication, rate limiting and a delete route.
+- A Dockerfile (M7), and mypy in CI once the remaining findings are fixed.
+
+[AMIYA: which of these you would do first, and why.]
