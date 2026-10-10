@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.api.files import router as files_router
 from app.db.session import get_engine, init_db
 from app.errors import install_error_handlers
+from app.middleware import BodyLimitMiddleware
 
 
 @asynccontextmanager
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     install_error_handlers(app)
+    app.add_middleware(BodyLimitMiddleware)
     app.include_router(files_router)
 
     @app.get("/health")
