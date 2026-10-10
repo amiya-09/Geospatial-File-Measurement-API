@@ -244,18 +244,22 @@ def _read_features(
             parts.take(part_count)  # lines or polygon rings; points have none
             raw_shape = reader.shape(index)
             raw_points = getattr(raw_shape, "points", ())
-            geometry = None
+            geometry, problem = None, None
             if raw_shape.shapeType == shapefile.NULL:
-                warnings.append(f"feature {index}: null shape; no geometry")
+                problem = "null shape; no geometry"
             elif not all(math.isfinite(c) for point in raw_points for c in point):
-                warnings.append(f"feature {index}: non-finite (NaN/inf) coordinate; no geometry")
+                problem = "non-finite (NaN/inf) coordinate; no geometry"
             else:
                 try:
                     geometry = shape(raw_shape.__geo_interface__)
                 except (shapefile.GeoJSON_Error, ShapelyError, ValueError) as exc:
-                    warnings.append(f"feature {index}: geometry could not be read ({exc})")
+                    problem = f"geometry could not be read ({exc})"
+            if problem is not None:
+                warnings.append(f"feature {index}: {problem}")
             properties = {k: _json_safe(v) for k, v in record.as_dict().items()}
-            features.append(Feature(index, None, geometry, properties))
+            features.append(
+                Feature(index, None, geometry, properties, (problem,) if problem else ())
+            )
     return features, warnings
 
 
@@ -338,7 +342,6 @@ def _drop_if_out_of_range(feature: Feature, warnings: list[str]) -> Feature:
     minx, miny, maxx, maxy = feature.geometry.bounds
     if -180 <= minx and maxx <= 180 and -90 <= miny and maxy <= 90:
         return feature
-    warnings.append(
-        f"feature {feature.index}: coordinates are out of the lon/lat range; no geometry"
-    )
-    return replace(feature, geometry=None)
+    problem = "coordinates are out of the lon/lat range; no geometry"
+    warnings.append(f"feature {feature.index}: {problem}")
+    return replace(feature, geometry=None, warnings=(*feature.warnings, problem))

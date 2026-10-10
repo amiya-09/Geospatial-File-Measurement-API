@@ -104,6 +104,33 @@ def test_antimeridian_warning_reaches_the_feature_and_the_file(client):
     assert feature["measurement"]["area_m2"] == pytest.approx(truth, rel=0.001)
 
 
+def test_a_dropped_geometry_carries_the_parser_warning_on_the_feature_too(client):
+    # The reason used to be only in the file's warnings: the feature said "no geometry" and had
+    # an empty warning list.
+    def features(data):
+        fid = upload(client, data).json()["id"]
+        return client.get(f"/api/files/{fid}/measurements/").json()["features"]
+
+    good = placemark("ok", "<Point><coordinates>10,50</coordinates></Point>")
+    bad = placemark("bad", "<Point><coordinates>500,50</coordinates></Point>")
+    assert [f["warnings"] for f in features(kml(good + bad))] == [
+        [],
+        ["coordinate '500,50' is out of the lon/lat range; geometry skipped"],
+    ]
+    assert [f["warnings"] for f in features(utm_polygon_zip())] == [[], ["null shape; no geometry"]]
+
+    def build(w):
+        for y in (50, 95):
+            w.point(10, y)
+            w.record(f"y={y}")
+
+    zipped = shapefile_zip(shapefile_parts(build, shapefile.POINT), prj=WGS84_PRJ)
+    assert [f["warnings"] for f in features(zipped)] == [
+        [],
+        ["coordinates are out of the lon/lat range; no geometry"],
+    ]
+
+
 def test_non_finite_property_values_are_stored_as_null(client, monkeypatch):
     from shapely.geometry import Point
 

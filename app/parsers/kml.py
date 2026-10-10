@@ -249,6 +249,7 @@ def parse_kml(
         index = len(features)
         if index >= max_features:
             raise ParseError(f"file has more than {max_features} features")
+        problem = None
         try:
             # Every line and every polygon ring is a <LineString> or <LinearRing>; count them
             # all before any geometry of this Placemark is built.
@@ -256,10 +257,15 @@ def parse_kml(
             geometry = _placemark_geometry(el, budget)
         except _GeometryError as exc:
             geometry = None
-            warnings.append(f"Placemark {index}: {exc}; geometry skipped")
+            problem = f"{exc}; geometry skipped"
+            warnings.append(f"Placemark {index}: {problem}")
         features.append(
             Feature(
-                index=index, source_id=el.get("id"), geometry=geometry, properties=_properties(el)
+                index=index,
+                source_id=el.get("id"),
+                geometry=geometry,
+                properties=_properties(el),
+                warnings=(problem,) if problem else (),
             )
         )
     return ParsedFile(crs=WGS84, features=features, warnings=warnings)

@@ -25,6 +25,7 @@ class Feature:
     source_id: str | None
     geometry: BaseGeometry | None  # in the file's own CRS; None when absent or unreadable
     properties: dict[str, Any]
+    warnings: tuple[str, ...] = ()  # why the geometry was dropped; also in the file's warnings
 
 
 @dataclass

@@ -118,7 +118,7 @@ def _measure_features(
         measurement: dict[str, Any]
         if feature.geometry is None:
             measurement = {"reason": "no geometry"}
-            is_valid, validity_reason, feature_warnings = True, None, []
+            is_valid, validity_reason, feature_warnings = True, None, list(feature.warnings)
         else:
             try:
                 if transformer is None:
