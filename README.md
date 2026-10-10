@@ -151,7 +151,7 @@ Geometry of the polygon above (`include_geometry=true`), outer ring plus the hol
 ### List
 
 ```bash
-curl "http://127.0.0.1:8000/api/files/?limit=2"
+curl "http://127.0.0.1:8000/api/files/?limit=1"
 ```
 
 ```json
@@ -213,10 +213,13 @@ app/
     crs.py           reprojection to WGS84, local LAEA / AEQD projections
     measure.py       area and length of WGS84 geometries
   db/                SQLAlchemy models, engine/session, repository
-scripts/             make_samples.py (sample generator), smoke.sh (curl end-to-end check)
+scripts/             make_samples.py (sample generator), smoke.sh (curl end-to-end check),
+                     verify_independent.py (Geod check), make_accuracy_doc.py (writes docs/accuracy.md)
 samples/             generated good and bad input files
 tests/               pytest suite
 docs/decisions.md    decision log
+docs/accuracy.md     accuracy table against pyproj.Geod
+docs/compliance.md   requirements traceability
 plan.md              the agreed plan
 ```
 
@@ -282,9 +285,8 @@ For each feature with geometry:
 ## How I built this
 
 I built this project in phases using Claude Code, Anthropic's AI coding agent. Claude Code wrote
-the code and the tests. It also drafted the documentation, including this section. I gave the
-instructions for each stage and chose between the options it reported. I reviewed each stage
-report before moving on. I mainly wrote the instructions and made the design decisions at each stage. I reviewed the implementation and test results, investigated problems, and worked to understand why the code behaved the way it did.
+the code and the tests, and I, Amiya Singh, directed, reviewed and tested it. Claude Code also
+drafted the documentation, including this section. I mainly wrote the instructions and made the design decisions at each stage. I reviewed the implementation and test results, investigated problems, and worked to understand why the code behaved the way it did.
 
 The work went in this order:
 
@@ -309,14 +311,16 @@ How the work was checked:
 - Tests first. For new behaviour and for bug fixes, the test was written and seen to fail
   before the code changed. A few tests that pinned behaviour already in place passed at once.
   The suite has 418 tests and runs in CI on Python 3.11 and 3.12.
-- A mutation test, `tests/test_parser_totality.py`. It takes valid KML files and shapefile ZIPs,
+- A fuzz test, `tests/test_parser_totality.py`. It takes valid KML files and shapefile ZIPs,
   corrupts them in seeded random ways (truncated, flipped, inserted, deleted and overwritten
   bytes), and checks that the parsers either return a result or raise one of their own errors
-  within 5 s. It found four bugs that would have been 500s, and its long run (20,000 mutations
-  per target) passes.
+  within 5 s. It found four bugs that would have been 500s, and its long run (20,000 corrupted
+  inputs per target) passes.
 - An independent check against `pyproj.Geod`. `scripts/verify_independent.py` imports nothing
   from `app`. It recomputes every sample feature with Geod and compares that with what the
   running API returns. All five measurable sample features agree within 0.0000%.
+- QGIS gave 755,598.48 m² for the Berlin polygon (corners 13.40,52.50 and 13.41,52.51), and the
+  API gave the same figure.
 - Property tests with hypothesis (for example, a polygon's area does not change with its
   starting vertex or ring direction), and a schemathesis run against the OpenAPI schema, which
   found one 500 (an `offset` of 2^63) and a missing `Allow` header.
@@ -374,8 +378,8 @@ worst repair near 1.5 s.
 
 This project taught me that getting the basic functionality working is only the first step. Handling edge cases, testing assumptions, and understanding why a design works are just as important as writing the code.
 
-Degrees are not metres. A 1 by 1 degree box covers about 12,309 km2 at the equator and about
-6,123 km2 at 60N, because a degree of longitude covers less ground away from the equator. A
+Degrees are not metres. A 1 by 1 degree box covers about 12,309 km2 between the equator and 1N,
+and about 6,123 km2 between 60N and 61N, because a degree of longitude covers less ground away from the equator. A
 calculation done directly on longitude and latitude gives both boxes the same number. That is
 why nothing in this API is measured in degrees.
 
@@ -398,7 +402,7 @@ A file's description of itself cannot be trusted. A ZIP header can claim that an
 bytes when it unpacks to 5 GB. The parser reads at most the remaining budget plus one byte, and
 if that extra byte arrives, the archive is over the limit and is rejected.
 
-Bad input must not become a 500. The mutation test found that an XML declaration with an unknown
+Bad input must not become a 500. The fuzz test found that an XML declaration with an unknown
 encoding raised an uncaught `LookupError`. The fault was in the input, not in the server, so it
 is now a 400.
 
@@ -483,7 +487,7 @@ Limits and known problems:
   is assumed. ESRI numeric ISO 8859 codes such as `88595` are not recognised.
 - At most four uploads are parsed and measured at once, in one process. With 60 uploads of 1,500
   polygons sent at once, 4 returned 201 and 56 returned 503 `server_busy` within 11.2 s, and
-  `/health` answered in 8 ms (median) and 965 ms at worst. More slots would not add speed: each
+  `/health` answered in 7.9 ms (median) and 965 ms at worst. More slots would not add speed: each
   of the four accepted uploads took up to 11 s, against 1.93 s for one upload alone. Clients have
   to retry after `Retry-After`.
 - Peak memory is still roughly four times one upload (25 MB upload, up to 100 MB of

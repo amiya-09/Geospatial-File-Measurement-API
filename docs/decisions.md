@@ -8,9 +8,9 @@ stage reports and `docs/accuracy.md`.
 
 I measure area in a Lambert azimuthal equal-area (LAEA) projection on the WGS84 datum, in
 metres. The code builds a new projection for every part of every feature, centred on that part's
-centroid. For the park in `samples/sample.kml` it is
-`+proj=laea +lat_0=52.505 +lon_0=13.41 +datum=WGS84 +units=m`, and the response returns that
-string in `area_crs` next to the value.
+centroid. For the park in `samples/sample.kml` it is centred at about latitude 52.505 and
+longitude 13.410, and the response returns the full projection string in `area_crs` next to the
+value.
 
 Area is the property I need, and LAEA is designed to keep it. Every projection keeps some
 properties and distorts others. Web Mercator is useful for web maps, but it does not keep area,
@@ -93,7 +93,7 @@ What went wrong with pyshp along the way:
   short. That is now a 400.
 - Deleted `.dbf` records could have shifted attributes onto the wrong shapes. Shapes and records
   are now read by position, and deleted records are skipped.
-- The mutation test found three exceptions from the ZIP and pyshp side that nothing caught: a
+- The fuzz test found three exceptions from the ZIP and pyshp side that nothing caught: a
   `.cpg` with a NUL byte, an unsupported ZIP version and a corrupt ZIP directory offset. Each
   would have been a 500. They are now a warning or a 400.
 
@@ -115,7 +115,7 @@ I rejected reading KML through GDAL, for the same installation reason as above.
 
 What went wrong first: there was no depth limit. Nested `MultiGeometry` elements were read
 recursively, and only a recursion error stopped a very deep file. The parser now stops at depth
-50 while reading, and 10,000 nested levels give a clean 400. The mutation test also found that
+50 while reading, and 10,000 nested levels give a clean 400. The fuzz test also found that
 an XML declaration naming an unknown encoding raised a `LookupError` that nothing caught. That
 would have been a 500 for what is really bad input, so it is now a 400.
 
@@ -144,21 +144,20 @@ the attempt as `FAILED` lets the client look up why it failed later. And a mista
 uploaded file should never come back as a 500: the input is wrong, not the server.
 
 What a 422 leaves behind, in the code: a `FAILED` record with `feature_count` 0 and no feature
-rows. `GET /api/files/{id}/` returns it with its `error`, and `GET /api/files/{id}/measurements/`
-answers 409 `file_failed` with the stored error. When an upload gets a 422, the client receives an error explaining why the file couldn’t be measured, along with a file ID. The client can use that ID to check the file’s status and stored error through the file details endpoint, but requesting measurements returns a 409 because the file failed processing.
+rows. When an upload gets a 422, the client receives an error explaining why the file couldn’t be measured, along with a file ID. The client can use that ID to check the file’s status and stored error through the file details endpoint, but requesting measurements returns a 409 because the file failed processing.
 
 What went wrong first: coordinates outside lon/lat. At first the range check lived only in
 `measure()`, so one bad coordinate failed the whole file with 422. The check also allowed a
 tolerance of 0.000001 degrees, so a latitude of 90.0000005 passed it, the projection returned a
 value that is not a finite number, and the database insert crashed with a 500. Now the check has
 no tolerance, and the parsers apply it per feature (the third group above). That change had a
-side effect: a KML written entirely in projected numbers became a 201 full of empty features. So
-a file that has features, but none with a usable geometry, is now a 422 again, with the message
-"none of the N features has a usable geometry".
+side effect: a KML written entirely in projected numbers became a 201 full of empty features, so
+I made that case a 422 again.
+
+When the parser finds a feature with invalid coordinates, it skips that geometry and records a warning instead of failing the entire file immediately. If every feature ends up without usable geometry, the service marks the file as FAILED, stores the error, and returns a 422 explaining that none of the features could be measured. If at least one feature has usable geometry, the file can still succeed while retaining the invalid features with warnings.
 
 The range check in `measure()` is still there. It turns non finite or out of range coordinates
 into a `MeasurementError`, and the service turns that into the `FAILED` record and the 422.
-When the parser finds a feature with invalid coordinates, it skips that geometry and records a warning instead of failing the entire file immediately. If every feature ends up without usable geometry, the service marks the file as FAILED, stores the error, and returns a 422 explaining that none of the features could be measured. If at least one feature has usable geometry, the file can still succeed while retaining the invalid features with warnings.
 
 Where it breaks: the per feature rule covers only what the parsers see. A feature that fails
 inside `measure()` (wider than 180 degrees, an invalid polygon over 350 vertices, more than
@@ -266,11 +265,7 @@ repaired, but with the default `make_valid` method, which dropped the overlappin
 counting it once (73.8 billion m2 instead of 86.1 billion). The security review also found the
 cost problem: a star shaped polygon with 141 vertices took about 30 s in `make_valid`.
 
-What the code does now: all polygons of one feature, including polygons inside a mixed
-collection, are checked together and repaired together with `make_valid` using the "structure"
-method, which merges overlaps. When the repair changes the area, a warning gives both numbers. An
-invalid feature whose polygons hold more than 350 vertices in total is not repaired, and the file
-gets 422. I check the polygons belonging to a feature together and use Shapely’s make_valid() with the structure method to repair invalid geometry and merge overlapping areas. If the repair changes the area, I add a warning showing the original and repaired measurements. To prevent expensive repairs from blocking the server, I reject invalid features whose polygons exceed 350 vertices in total, while valid polygons are still measured regardless of their vertex count.
+I check the polygons belonging to a feature together and use Shapely’s make_valid() with the structure method to repair invalid geometry and merge overlapping areas. If the repair changes the area, I add a warning showing the original and repaired measurements. To prevent expensive repairs from blocking the server, a feature whose polygons need repair and have more than 350 vertices in total makes the whole file fail with a 422, while valid polygons are still measured regardless of their vertex count.
 
 The 350 vertex cap applies only to invalid polygons that need repair. A valid coastline with
 50,000 vertices is still measured. The cap limits the worst case time, but it can reject an
