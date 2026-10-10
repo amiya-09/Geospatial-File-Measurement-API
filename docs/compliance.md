@@ -13,7 +13,7 @@ This matrix was checked against the original assignment document on 2026-10-10.
 | # | Kind | Item |
 |---|---|---|
 | M1 | FIXED (2026-10-10) | **Public GitHub repo (assignment section 8):** <https://github.com/amiya-09/Geospatial-File-Measurement-API>. The first GitHub Actions run of `.github/workflows/ci.yml` on that push succeeded on Python 3.11 and 3.12. |
-| M2 | NOTE | **README "Design decisions and alternatives", "Learnings", "Future scope"** (sections 7 and 8) and `docs/decisions.md` are drafted (2026-10-10). They still hold `[AMIYA: ...]` markers for the author to fill before submission. |
+| M2 | FIXED (2026-10-10) | **README "Design decisions and alternatives", "Learnings", "Future scope"** (sections 7 and 8) and `docs/decisions.md` are written. The author filled every place the draft left for them, in their own words, or removed it. |
 | M3 | NOTE | `plan.md` says status goes `PROCESSING -> COMPLETED \| FAILED`. Processing is synchronous, so `PROCESSING` is never stored or returned; only `COMPLETED` and `FAILED` exist. |
 | M4 | NOTE | `plan.md` says points get `measurement: null` with a reason. The API returns a `measurement` **object** whose values are all `null`, with `reason` set (`"not applicable"`, `"unsupported"`, `"no geometry"`, ...). The object shape is the same for every feature. |
 | M5 | NOTE | The spec's example shows `"id": "abc123"`; ids are UUID strings. Compatible with the example's type, not its value. |
@@ -63,8 +63,8 @@ listed under "Not defined by the spec, our choices" below.
 | 7 | README: Setup | `README.md` "Setup", "Running" | fresh-clone check (below) | OK |
 | 7 | README: API with example requests/responses | `README.md` "API reference" (real captured output) | `scripts/smoke.sh` | NOTE: upload, measurements, list and error responses are shown. For file details the README gives the curl command and says it returns the same object as the upload, with no separate response block (checked by reading the README on 2026-10-10) |
 | 7 | README: Architecture (structure, file flow, measurement flow, CRS handling) | `README.md` "Project structure", "File-processing flow", "Measurement flow", "CRS handling summary" | n/a (documentation) | OK |
-| 7 | README: Design decisions and alternatives | `README.md` "Design decisions and alternatives"; `docs/decisions.md` | n/a | NOTE (M2) |
-| 8 | README mentions learnings and future scope | `README.md` "Learnings", "Future scope" | n/a | NOTE (M2) |
+| 7 | README: Design decisions and alternatives | `README.md` "Design decisions and alternatives"; `docs/decisions.md` | n/a | OK (M2) |
+| 8 | README mentions learnings and future scope | `README.md` "Learnings", "Future scope" | n/a | OK (M2) |
 | 8 | Public GitHub repo | <https://github.com/amiya-09/Geospatial-File-Measurement-API> | GitHub Actions (`.github/workflows/ci.yml`) | OK (M1) |
 | 8 | Share the repo link | n/a | n/a | Yours to do (see below) |
 
@@ -86,7 +86,6 @@ was actually checked, on 2026-10-10 unless stated.
 
 - Share the public repo link (assignment section 8: "Create a public github repo and share the
   link"). This cannot be done from here.
-- Fill the `[AMIYA: ...]` markers in the README and `docs/decisions.md` (M2).
 
 ## Field names
 
