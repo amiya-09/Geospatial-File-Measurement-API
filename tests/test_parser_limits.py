@@ -1,7 +1,13 @@
 import pytest
 import shapefile
 
-from app.config import MAX_FEATURES, MAX_PARTS, MAX_REPAIR_VERTICES, MAX_VERTICES
+from app.config import (
+    MAX_FEATURES,
+    MAX_PARTS,
+    MAX_REPAIR_VERTICES,
+    MAX_UNCOMPRESSED_BYTES,
+    MAX_VERTICES,
+)
 from app.parsers import kml as kml_module
 from app.parsers import shapefile as shapefile_module
 from app.parsers.base import Budget, ParseError
@@ -16,6 +22,7 @@ def test_default_limits():
     assert MAX_VERTICES == 1_000_000
     assert MAX_PARTS == 20_000
     assert MAX_REPAIR_VERTICES == 350
+    assert MAX_UNCOMPRESSED_BYTES == 100 * 1024 * 1024
 
 
 def test_budget_counts_cumulatively_and_allows_exactly_the_limit():

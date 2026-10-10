@@ -48,6 +48,12 @@ def test_zip_bomb_is_400_and_does_not_get_decompressed(client, parts):
     assert resp.status_code == 400 and "uncompressed" in resp.json()["error"]["message"]
 
 
+def test_zip_just_over_100_mb_uncompressed_is_400(client, parts):
+    zipped = shapefile_zip(parts, extra={"zeros.bin": b"\x00" * (100 * 1024 * 1024 + 1)})
+    resp = upload(client, zipped)
+    assert resp.status_code == 400 and "uncompressed" in resp.json()["error"]["message"]
+
+
 def test_encrypted_and_multi_shapefile_zips_are_400(client, parts):
     from tests.fixtures import mark_entries_encrypted
 

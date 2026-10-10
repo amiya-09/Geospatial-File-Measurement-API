@@ -7,7 +7,7 @@ from pathlib import Path
 DATABASE_PATH = Path(os.environ.get("GEO_API_DB", "geo_api.db"))
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_ZIP_ENTRIES = 100
-MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_FEATURES = 10_000
 MAX_VERTICES = 1_000_000
 # Lines and polygon rings per upload (points do not count). Each part is projected on its own,
