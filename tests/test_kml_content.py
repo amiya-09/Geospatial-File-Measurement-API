@@ -115,3 +115,14 @@ def test_max_depth_is_configurable():
     assert len(parse_kml(data, max_depth=20).features) == 1
     with pytest.raises(ParseError, match="nested"):
         parse_kml(data, max_depth=8)
+
+
+def test_element_count_up_to_the_limit_is_accepted_and_one_more_is_not():
+    # A 25 MB KML of 6.5 million empty elements took 23 s and 554 MB with no limit.
+    # <kml>, <Document> and the Placemark's 3 elements make 5; the rest is padding.
+    def padded(n: int) -> bytes:
+        return kml(PLACEMARK + "<a/>" * n)
+
+    assert len(parse_kml(padded(5), max_elements=10).features) == 1
+    with pytest.raises(ParseError, match="more than 10 XML elements"):
+        parse_kml(padded(6), max_elements=10)

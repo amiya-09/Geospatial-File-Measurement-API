@@ -25,7 +25,7 @@ from shapely.geometry import (
 )
 from shapely.geometry.base import BaseGeometry
 
-from app.config import MAX_FEATURES, MAX_PARTS, MAX_VERTICES, MAX_XML_DEPTH
+from app.config import MAX_FEATURES, MAX_PARTS, MAX_VERTICES, MAX_XML_DEPTH, MAX_XML_ELEMENTS
 from app.parsers.base import Budget, Feature, ParsedFile, ParseError
 
 
@@ -169,9 +169,10 @@ def _properties(placemark: Element) -> dict[str, str]:
     return props
 
 
-def _parse_xml(data: bytes, max_depth: int) -> Element:
-    """Parse safely, aborting as soon as nesting passes ``max_depth`` (root is depth 1)."""
-    root, depth = None, 0
+def _parse_xml(data: bytes, max_depth: int, max_elements: int) -> Element:
+    """Parse safely, aborting as soon as nesting passes ``max_depth`` (root is depth 1) or the
+    number of elements passes ``max_elements``."""
+    root, depth, elements = None, 0, 0
     try:
         for event, el in safe_et.iterparse(
             io.BytesIO(data), events=("start", "end"), forbid_dtd=True
@@ -180,10 +181,13 @@ def _parse_xml(data: bytes, max_depth: int) -> Element:
                 depth -= 1
                 continue
             depth += 1
+            elements += 1
             if root is None:
                 root = el
             if depth > max_depth:
                 raise ParseError(f"XML is nested more than {max_depth} levels deep")
+            if elements > max_elements:
+                raise ParseError(f"KML has more than {max_elements} XML elements")
     except ParseError:
         raise
     except (
@@ -206,10 +210,11 @@ def parse_kml(
     max_vertices: int = MAX_VERTICES,
     max_parts: int = MAX_PARTS,
     max_depth: int = MAX_XML_DEPTH,
+    max_elements: int = MAX_XML_ELEMENTS,
 ) -> ParsedFile:
     if not data.strip():
         raise ParseError("file is empty")
-    root = _parse_xml(data, max_depth)
+    root = _parse_xml(data, max_depth, max_elements)
     if _local(root.tag) != "kml":
         raise NotKmlError(f"not a KML file: root element is <{_local(root.tag)}>, expected <kml>")
 

@@ -19,6 +19,10 @@ MAX_PARTS = 20_000
 # Read at call time so tests can lower it.
 MAX_REPAIR_VERTICES = 350
 MAX_XML_DEPTH = 50
+# Elements in one KML. defusedxml builds the tree with Python's own (slow) XML parser: 25 MB of
+# empty elements took 23 s and 554 MB without a limit, and is rejected after 1.4 s and 45 MB with
+# this one. A KML with 10,000 Placemarks of about 30 elements each needs 300,000.
+MAX_XML_ELEMENTS = 500_000
 # Parsing and measuring are CPU bound and hold the decompressed upload in memory, so only this
 # many uploads are processed at once. Another upload waits up to UPLOAD_SLOT_WAIT_SECONDS for
 # a slot, then gets 503 server_busy. The wait is read at call time so tests can lower it.

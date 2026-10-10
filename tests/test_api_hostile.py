@@ -97,6 +97,17 @@ def test_xml_entity_bomb_and_external_entity_are_400(client):
         assert "root:" not in resp.text
 
 
+def test_too_many_xml_elements_in_kml_is_400_and_stores_nothing(client, monkeypatch):
+    from app.services import files as files_service
+
+    original = files_service.parse_kml
+    monkeypatch.setattr(files_service, "parse_kml", lambda data: original(data, max_elements=10))
+    resp = upload(client, kml("<a/>" * 20))
+    assert resp.status_code == 400
+    assert "more than 10 XML elements" in resp.json()["error"]["message"]
+    assert client.get("/api/files/").json() == []
+
+
 def test_too_many_vertices_in_kml_is_400(client, monkeypatch):
     from app.services import files as files_service
 
