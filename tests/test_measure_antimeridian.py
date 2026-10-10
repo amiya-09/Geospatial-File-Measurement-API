@@ -79,3 +79,26 @@ def test_feature_that_cannot_be_unwrapped_is_rejected(geom):
 def test_continuous_longitudes_outside_range_are_still_rejected_by_the_range_guard():
     with pytest.raises(MeasurementError):
         measure(Polygon(UNWRAPPED_BOX))
+
+
+# Unwrapping must never turn a non-empty part into a zero-measure one. -180 and 180 are the
+# same meridian, so the +360 shift collapses a feature that spans the whole circle.
+@pytest.mark.parametrize(
+    "geom",
+    [
+        Polygon([(-180, -90), (180, -90), (180, 90), (-180, 90)]),
+        Polygon([(-180, 10), (180, 10), (180, 20), (-180, 20)]),
+        LineString([(-180, 0), (180, 0)]),
+    ],
+    ids=["whole_world_box", "mid_latitude_band", "full_circle_line"],
+)
+def test_feature_that_collapses_when_unwrapped_is_rejected(geom):
+    with pytest.raises(MeasurementError, match="more than 180 degrees"):
+        measure(geom)
+
+
+def test_multipolygon_with_a_collapsing_part_is_rejected_not_dropped():
+    normal = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    collapsing = Polygon([(-180, 10), (180, 10), (180, 20), (-180, 20)])
+    with pytest.raises(MeasurementError, match="more than 180 degrees"):
+        measure(MultiPolygon([normal, collapsing]))

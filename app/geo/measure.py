@@ -47,6 +47,11 @@ def _lon_span(geom: BaseGeometry) -> float:
     return maxx - minx
 
 
+def _degree_measure(geom: BaseGeometry) -> float:
+    """Planar size in degrees (area for polygons, length for lines); only compared to zero."""
+    return geom.area if isinstance(geom, Polygon) else geom.length
+
+
 def _unwrap_antimeridian(part: BaseGeometry) -> tuple[BaseGeometry, bool]:
     """Fix a part written with wrapped longitudes (e.g. 179 -> -179 across the antimeridian).
 
@@ -67,10 +72,17 @@ def _unwrap_antimeridian(part: BaseGeometry) -> tuple[BaseGeometry, bool]:
     alt_span = _lon_span(alternative)
     if min(span, alt_span) > 180:
         raise MeasurementError(
-            f"feature spans {min(span, alt_span):.1f} degrees of longitude even after "
-            "unwrapping the antimeridian; it cannot be measured"
+            f"feature spans more than 180 degrees of longitude ({min(span, alt_span):.1f}) "
+            "even after unwrapping the antimeridian; it cannot be unwrapped or measured"
         )
     if alt_span < span:
+        # -180 and 180 are the same meridian, so a feature that goes all the way round
+        # collapses to nothing when shifted. Never trade a real feature for an empty one.
+        if _degree_measure(alternative) == 0 and _degree_measure(part) > 0:
+            raise MeasurementError(
+                "feature spans more than 180 degrees of longitude and collapses to zero "
+                "size when unwrapped across the antimeridian; it cannot be unwrapped or measured"
+            )
         return alternative, True
     return part, False
 

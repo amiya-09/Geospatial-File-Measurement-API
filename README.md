@@ -245,8 +245,9 @@ For each feature with geometry:
    part's centroid and project into it: **Lambert azimuthal equal-area** for area,
    **azimuthal equidistant** for length.
 5. Antimeridian: a part spanning more than 180 degrees of longitude is retried with negative
-   longitudes shifted by +360; if it still spans more than 180 degrees the file is
-   unmeasurable. A warning is recorded when the shift is applied.
+   longitudes shifted by +360; if it still spans more than 180 degrees, or the shift would
+   collapse it to zero size (a feature that goes all the way round the globe), the file is
+   unmeasurable (422). A warning is recorded when the shift is applied.
 6. Measure in metres, sum the parts, and attach the unit and local CRS to each value.
 
 ## CRS handling summary

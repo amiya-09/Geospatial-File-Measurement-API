@@ -50,3 +50,13 @@ def test_pre_split_multipolygon_is_summed_without_a_warning(client):
     assert feature["geometry_type"] == "MultiPolygon"
     assert feature["measurement"]["area_m2"] == pytest.approx(TRUE_BOX_M2, rel=0.001)
     assert not any("antimeridian" in w for w in feature["warnings"] + info["warnings"])
+
+
+def test_feature_spanning_the_whole_circle_is_422_with_a_failed_record(client):
+    world = placemark("world", polygon_kml("-180,-90 180,-90 180,90 -180,90 -180,-90"))
+    resp = upload(client, kml(world))
+    assert resp.status_code == 422
+    err = resp.json()["error"]
+    assert "more than 180 degrees" in err["message"]
+    info = client.get(f"/api/files/{err['file_id']}/").json()
+    assert info["status"] == "FAILED"
