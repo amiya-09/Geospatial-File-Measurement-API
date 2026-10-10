@@ -284,7 +284,7 @@ For each feature with geometry:
 I built this project in phases using Claude Code, Anthropic's AI coding agent. Claude Code wrote
 the code and the tests. It also drafted the documentation, including this section. I gave the
 instructions for each stage and chose between the options it reported. I reviewed each stage
-report before moving on. [AMIYA: anything you wrote or changed by hand.]
+report before moving on. I mainly wrote the instructions and made the design decisions at each stage. I reviewed the implementation and test results, investigated problems, and worked to understand why the code behaved the way it did.
 
 The work went in this order:
 
@@ -321,7 +321,7 @@ How the work was checked:
   starting vertex or ring direction), and a schemathesis run against the OpenAPI schema, which
   found one 500 (an `offset` of 2^63) and a missing `Allow` header.
 
-[AMIYA: a sentence or two of your own on working this way.]
+I reviewed the implementation in stages and used tests to catch problems that normal testing might miss. Comparing the API’s results against an independent Geod calculation also helped me check whether the measurements were actually correct, rather than just trusting my own code.
 
 ## Design decisions and alternatives
 
@@ -372,7 +372,7 @@ worst repair near 1.5 s.
 
 ## Learnings
 
-[AMIYA: an opening sentence or two of your own.]
+This project taught me that getting the basic functionality working is only the first step. Handling edge cases, testing assumptions, and understanding why a design works are just as important as writing the code.
 
 Degrees are not metres. A 1 by 1 degree box covers about 12,309 km2 at the equator and about
 6,123 km2 at 60N, because a degree of longitude covers less ground away from the equator. A
@@ -422,7 +422,7 @@ with a corner at latitude 95 and a Placemark without geometry is a 201: the firs
 and the other two are kept with `geometry: null` and a warning. Without the valid polygon the
 same file is a 422, because no feature has a usable geometry.
 
-[AMIYA: what you would do differently next time.]
+Next time, I’d test the difficult edge cases earlier instead of discovering them late in development. I’d also spend more time understanding the trade-offs behind each design decision before implementing it, so I could catch problems sooner and explain the reasoning more confidently.
 
 ## Known limitations and deviations
 
@@ -530,4 +530,4 @@ Limits and known problems:
 - Authentication, rate limiting and a delete route.
 - A Dockerfile (M7), and mypy in CI once the remaining findings are fixed.
 
-[AMIYA: which of these you would do first, and why.]
+I’d prioritise background processing first because large uploads currently keep the request busy while parsing and measuring happen. Moving that work to a background worker would let the API respond quickly and handle longer-running jobs more reliably.

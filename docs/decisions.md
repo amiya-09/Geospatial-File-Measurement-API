@@ -17,12 +17,11 @@ properties and distorts others. Web Mercator is useful for web maps, but it does
 so it is the wrong map to measure polygons in.
 
 The centring happens in `project_local` (`app/geo/crs.py`).
-[AMIYA: in your own words, why the projection is centred on the shape itself.]
+I centre the projection on the shape’s centroid because projections introduce less distortion near their centre. This makes the area measurement more reliable for relatively small shapes than using one fixed projection centre for every feature.
 
 Each part of a MultiPolygon or a collection gets its own projection, and the parts are summed
 (`_measure_parts` in `app/geo/measure.py`). A test checks that two distant parts measured
-together give the same total as the sum of each part measured alone. [AMIYA: why one shared
-projection for parts that are far apart would be a problem.]
+together give the same total as the sum of each part measured alone. If two parts are thousands of kilometres apart, one shared projection centred on one part could introduce significant distortion when measuring the other. By giving each part its own local projection, I can measure both more reliably and then add their areas together.
 
 I rejected one projection for all features. Web Mercator would have been the simplest, but at
 60N it makes a 1 degree box about four times too big (`tests/test_measure.py`, the Web Mercator
@@ -44,8 +43,7 @@ on the part's centroid. AEQD keeps true distances measured from its centre, whic
 length needs. The centre has to be near the line: an AEQD map centred on Berlin would give an
 inaccurate length for a footpath in Sydney.
 
-The plan named the UTM zone of the centroid as the alternative. [AMIYA: why you chose a local
-AEQD over the UTM zone of the centroid.]
+The plan named the UTM zone of the centroid as the alternative. I chose local AEQD because it centres the projection on the line itself and preserves distances from that centre. UTM uses fixed geographic zones, so a line near a zone boundary or spanning a large area may experience more distortion than expected.
 
 Where it degrades: AEQD is exact only along lines through its centre. Two 20 degree legs (about
 2,200 km each) come out 0.126% longer than Geod, a 5 degree L shape 0.008% longer, and a line
@@ -61,8 +59,8 @@ even when the file is already in a projected CRS such as UTM. Z and M values are
 that, because the API measures horizontal area and length. Every `Transformer` in the code is
 built with `always_xy=True`.
 
-[AMIYA: why a file's own projected CRS is never used for measuring, even for a UTM file.]
-[AMIYA: what would go wrong without `always_xy=True`.]
+I convert every geometry to WGS84 first so that all input files use the same geographic coordinate system, regardless of their original CRS. Then I create a suitable local projection for the measurement, rather than assuming the file’s existing projection is accurate for area or length calculations.
+Without always_xy=True, PyProj may follow the CRS’s official axis order, which for EPSG:4326 can be latitude first and longitude second. My code expects X,Y order, meaning longitude first and latitude second, so the coordinates could be swapped and produce incorrect locations and measurements.
 
 What the tests show: a box at 60N given in Web Mercator (EPSG:3857) measures the same as Geod
 after this step, while its area in Web Mercator units is more than three times the true area.
@@ -113,8 +111,7 @@ Polygon with any number of holes, MultiGeometry, or a bare LinearRing, which is 
 LineString so its length is measured. Properties come from `name`, `description`,
 `ExtendedData/Data` and `SchemaData/SimpleData`.
 
-I rejected reading KML through GDAL, for the same installation reason as above. [AMIYA: if you
-looked at a KML library, which one and why you did not use it.]
+I rejected reading KML through GDAL, for the same installation reason as above.
 
 What went wrong first: there was no depth limit. Nested `MultiGeometry` elements were read
 recursively, and only a recursion error stopped a very deep file. The parser now stops at depth
@@ -148,8 +145,7 @@ uploaded file should never come back as a 500: the input is wrong, not the serve
 
 What a 422 leaves behind, in the code: a `FAILED` record with `feature_count` 0 and no feature
 rows. `GET /api/files/{id}/` returns it with its `error`, and `GET /api/files/{id}/measurements/`
-answers 409 `file_failed` with the stored error. [AMIYA: in your own words, what a client sees
-after a 422 and what it can do with the file id.]
+answers 409 `file_failed` with the stored error. When an upload gets a 422, the client receives an error explaining why the file couldn’t be measured, along with a file ID. The client can use that ID to check the file’s status and stored error through the file details endpoint, but requesting measurements returns a 409 because the file failed processing.
 
 What went wrong first: coordinates outside lon/lat. At first the range check lived only in
 `measure()`, so one bad coordinate failed the whole file with 422. The check also allowed a
@@ -162,7 +158,7 @@ a file that has features, but none with a usable geometry, is now a 422 again, w
 
 The range check in `measure()` is still there. It turns non finite or out of range coordinates
 into a `MeasurementError`, and the service turns that into the `FAILED` record and the 422.
-[AMIYA: describe this error path in your own words, from the parser warning to the 422.]
+When the parser finds a feature with invalid coordinates, it skips that geometry and records a warning instead of failing the entire file immediately. If every feature ends up without usable geometry, the service marks the file as FAILED, stores the error, and returns a 422 explaining that none of the features could be measured. If at least one feature has usable geometry, the file can still succeed while retaining the invalid features with warnings.
 
 Where it breaks: the per feature rule covers only what the parsers see. A feature that fails
 inside `measure()` (wider than 180 degrees, an invalid polygon over 350 vertices, more than
@@ -182,8 +178,7 @@ is the south west corner of the sample park in Berlin, and the same pair means a
 in another CRS. So I only accept the one case where the numbers can be lon/lat degrees, and I do
 not guess a projected CRS.
 
-I rejected refusing every shapefile without a `.prj`. [AMIYA: why you allowed the lon/lat
-fallback instead of refusing all such files.]
+I rejected refusing every shapefile without a `.prj`. I allow the fallback because some Shapefiles without a .prj file may still contain valid longitude and latitude coordinates. If all coordinates fit within the valid longitude and latitude ranges, I assume EPSG:4326 and return a warning instead of rejecting the file outright. If the coordinates don’t fit those ranges, I refuse to guess the CRS because the same numbers can represent completely different locations in another coordinate system.
 
 Where it breaks: the fallback cannot tell degrees from small projected numbers. Checked on
 2026-10-10 with a scratch script (not a committed test): a 40 m by 40 m square in a local
@@ -219,8 +214,7 @@ run at once, so the server is not overwhelmed.
 
 What a 503 means for a client, in the code: nothing was stored, and `Retry-After` is 5 seconds.
 `server_busy` means all four slots stayed busy for 2 s; `database_busy` means the write lock or a
-pooled connection was not free within 5 s. [AMIYA: in your own words, what a client should do
-with a 503 and why a retry cannot create a duplicate.]
+pooled connection was not free within 5 s. If the client receives a 503, it should wait for the recommended five seconds using the Retry-After header and then retry the upload. The server returns this error before storing anything, so the failed attempt doesn’t create a file record that could be duplicated by the retry.
 
 I rejected background jobs with a `PROCESSING` status for now; they are in Future scope. I did
 not add more server processes either.
@@ -253,8 +247,7 @@ checked and polygons were repaired before the unwrap. A wrapped box and a small 
 unwrapped first, and only then checked and repaired.
 
 The box at longitude 10 was involved even though it is far from 180. In the raw numbers, the
-wrapped box's longitudes run from -179 to 179. [AMIYA: in your own words, why that pulled the
-box at longitude 10 into the repair.]
+wrapped box's longitudes run from -179 to 179. Before unwrapping, the antimeridian-crossing box looked like it stretched from −179° to 179°, covering almost the whole world. The small box at longitude 10° appeared to overlap that huge band, so Shapely treated the combined geometry as invalid and make_valid() merged them during repair.
 
 Where it breaks: the rule cannot know what the author meant. `box(-170, 0, 170, 10)` is read as
 a 20 degree box across 180, not a 340 degree box, and only the warning says so. A feature written
@@ -277,7 +270,7 @@ What the code does now: all polygons of one feature, including polygons inside a
 collection, are checked together and repaired together with `make_valid` using the "structure"
 method, which merges overlaps. When the repair changes the area, a warning gives both numbers. An
 invalid feature whose polygons hold more than 350 vertices in total is not repaired, and the file
-gets 422. [AMIYA: in your own words, how repair works now.]
+gets 422. I check the polygons belonging to a feature together and use Shapely’s make_valid() with the structure method to repair invalid geometry and merge overlapping areas. If the repair changes the area, I add a warning showing the original and repaired measurements. To prevent expensive repairs from blocking the server, I reject invalid features whose polygons exceed 350 vertices in total, while valid polygons are still measured regardless of their vertex count.
 
 The 350 vertex cap applies only to invalid polygons that need repair. A valid coastline with
 50,000 vertices is still measured. The cap limits the worst case time, but it can reject an
