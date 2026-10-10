@@ -28,9 +28,8 @@ from app.config import (
     MAX_VERTICES,
     MAX_ZIP_ENTRIES,
 )
+from app.geo.crs import WGS84
 from app.parsers.base import Budget, Feature, ParsedFile, ParseError, UnmeasurableError
-
-WGS84 = CRS.from_epsg(4326)
 
 ZIP_SIGNATURE = b"PK\x03\x04"
 _MEMBER_EXTENSIONS = {".shp", ".shx", ".dbf", ".prj", ".cpg"}

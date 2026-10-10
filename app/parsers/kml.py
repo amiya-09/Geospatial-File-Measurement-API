@@ -12,7 +12,6 @@ from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as safe_et
 from defusedxml import DefusedXmlException
-from pyproj import CRS
 from shapely.errors import ShapelyError
 from shapely.geometry import (
     GeometryCollection,
@@ -26,14 +25,13 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 
 from app.config import MAX_FEATURES, MAX_PARTS, MAX_VERTICES, MAX_XML_DEPTH, MAX_XML_ELEMENTS
+from app.geo.crs import WGS84
 from app.parsers.base import Budget, Feature, ParsedFile, ParseError
 
 
 class NotKmlError(ParseError):
     """Well-formed XML, but the root element is not <kml>: some other kind of file."""
 
-
-WGS84 = CRS.from_epsg(4326)
 
 _GEOMETRY_TAGS = {"Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"}
 _UNSUPPORTED_TAGS = {"Track", "MultiTrack", "Model"}

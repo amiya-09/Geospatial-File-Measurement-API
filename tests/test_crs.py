@@ -7,6 +7,13 @@ from app.geo.crs import local_aeqd, local_laea, project_local, to_wgs84
 WGS84 = CRS.from_epsg(4326)
 
 
+def test_the_parsers_use_the_one_wgs84_crs():
+    from app.geo import crs
+    from app.parsers import kml, shapefile
+
+    assert kml.WGS84 is crs.WGS84 and shapefile.WGS84 is crs.WGS84
+
+
 def test_to_wgs84_is_identity_for_4326_and_keeps_lon_lat_order():
     out = to_wgs84(Point(10.0, 50.0), WGS84)
     assert (out.x, out.y) == pytest.approx((10.0, 50.0))
