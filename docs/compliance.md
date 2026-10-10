@@ -12,8 +12,8 @@ This matrix was checked against the original assignment document on 2026-10-10.
 
 | # | Kind | Item |
 |---|---|---|
-| M1 | GAP | **Public GitHub repo (assignment section 8)** is not done: the repo only exists locally, so `.github/workflows/ci.yml` has never run on GitHub (the same commands pass locally on Python 3.11, 3.12 and 3.13). |
-| M2 | GAP | **README "Design decisions and alternatives", "Learnings", "Future scope"** (sections 7 and 8) are placeholders for the author; `docs/decisions.md` is an empty skeleton. |
+| M1 | FIXED (2026-10-10) | **Public GitHub repo (assignment section 8):** <https://github.com/amiya-09/Geospatial-File-Measurement-API>. The first GitHub Actions run of `.github/workflows/ci.yml` on that push succeeded on Python 3.11 and 3.12. |
+| M2 | NOTE | **README "Design decisions and alternatives", "Learnings", "Future scope"** (sections 7 and 8) and `docs/decisions.md` are drafted (2026-10-10). They still hold `[AMIYA: ...]` markers for the author to fill before submission. |
 | M3 | NOTE | `plan.md` says status goes `PROCESSING -> COMPLETED \| FAILED`. Processing is synchronous, so `PROCESSING` is never stored or returned; only `COMPLETED` and `FAILED` exist. |
 | M4 | NOTE | `plan.md` says points get `measurement: null` with a reason. The API returns a `measurement` **object** whose values are all `null`, with `reason` set (`"not applicable"`, `"unsupported"`, `"no geometry"`, ...). The object shape is the same for every feature. |
 | M5 | NOTE | The spec's example shows `"id": "abc123"`; ids are UUID strings. Compatible with the example's type, not its value. |
@@ -63,9 +63,9 @@ listed under "Not defined by the spec, our choices" below.
 | 7 | README: Setup | `README.md` "Setup", "Running" | fresh-clone check (below) | OK |
 | 7 | README: API with example requests/responses | `README.md` "API reference" (real captured output) | `scripts/smoke.sh` | NOTE: upload, measurements, list and error responses are shown. For file details the README gives the curl command and says it returns the same object as the upload, with no separate response block (checked by reading the README on 2026-10-10) |
 | 7 | README: Architecture (structure, file flow, measurement flow, CRS handling) | `README.md` "Project structure", "File-processing flow", "Measurement flow", "CRS handling summary" | n/a (documentation) | OK |
-| 7 | README: Design decisions and alternatives | placeholder in `README.md`; `docs/decisions.md` skeleton | n/a | GAP (M2) |
-| 8 | README mentions learnings and future scope | placeholders in `README.md` | n/a | GAP (M2) |
-| 8 | Public GitHub repo | none | n/a | GAP (M1) |
+| 7 | README: Design decisions and alternatives | `README.md` "Design decisions and alternatives"; `docs/decisions.md` | n/a | NOTE (M2) |
+| 8 | README mentions learnings and future scope | `README.md` "Learnings", "Future scope" | n/a | NOTE (M2) |
+| 8 | Public GitHub repo | <https://github.com/amiya-09/Geospatial-File-Measurement-API> | GitHub Actions (`.github/workflows/ci.yml`) | OK (M1) |
 | 8 | Share the repo link | n/a | n/a | Yours to do (see below) |
 
 ## Not defined by the spec, our choices
@@ -77,7 +77,7 @@ was actually checked, on 2026-10-10 unless stated.
 |---|---|---|---|
 | POST response body | "Uploads and processes a file." No response example. | 201 with the file information object | For `samples/sample.kml` the POST body equals the GET file details body |
 | Measurements response shape | "Returns measurements for the features in the file." No list or wrapper, no field names. `feature_count` appears only in the file information example. | An object `{file_id, crs, total, limit, offset, features}` | Live keys listed; the wrapper has no `feature_count` and the file details endpoint keeps it |
-| Multipart field name | Not named. | The upload must be the form field `file` | A field named `upload` returns 422. Since commit `a4e6944` the message names the expected field (`tests/test_api_files.py::test_missing_file_field_message_names_the_expected_field`) |
+| Multipart field name | Not named. | The upload must be the form field `file` | A field named `upload` returns 422. Since commit `9e82a17` the message names the expected field (`tests/test_api_files.py::test_missing_file_field_message_names_the_expected_field`) |
 | Status codes | None defined. | See "Status codes" below | n/a |
 | Processing limits | None defined. | `app/config.py`: upload 25 MB, uncompressed ZIP 100 MB, 100 ZIP entries, 10,000 features, 1,000,000 vertices, 20,000 lines and polygon rings, repair of invalid polygons up to 350 vertices, XML depth 50, four uploads processed at once | `tests/test_parser_limits.py::test_default_limits`; `tests/test_upload_slots.py::test_default_slot_settings`; the limit tests in `test_parser_limits.py`, `test_measure_repair.py` and `test_api_hostile.py` |
 | Coordinates outside lon/lat range | Not covered. | Strict check, no tolerance. KML, or a shapefile in a lon/lat CRS: that feature is kept with no geometry and a warning, and the rest of the file is stored (201). If no feature is left with a usable geometry, the file is unmeasurable (422, `FAILED` record). A shapefile without `.prj` whose coordinates do not fit lon/lat stays unmeasurable (422) | `tests/test_coordinate_range.py`; `test_api_files.py::test_kml_whose_only_feature_is_outside_lon_lat_is_422_with_a_failed_record`; `samples/bad_coordinates.kml` (422 in `scripts/smoke.sh`) |
@@ -86,8 +86,7 @@ was actually checked, on 2026-10-10 unless stated.
 
 - Share the public repo link (assignment section 8: "Create a public github repo and share the
   link"). This cannot be done from here.
-- Create the public repo (M1) and write the README sections for design decisions, learnings and
-  future scope (M2).
+- Fill the `[AMIYA: ...]` markers in the README and `docs/decisions.md` (M2).
 
 ## Field names
 
@@ -147,5 +146,5 @@ The assignment defines no status codes. This table is our own design.
 | OpenAPI docs: summary and example per endpoint | `app/api/files.py`, `app/schemas.py` | `test_openapi.py` | OK |
 | Tests vs `pyproj.Geod` | `tests/expected_values.py` | `test_measure*.py`; `scripts/verify_independent.py` (independent of `app`) | OK |
 | Sample files, final run from a clean clone | `samples/`, `scripts/make_samples.py`, `scripts/smoke.sh` | `test_samples.py`; fresh-clone check | OK |
-| Public repo | none | n/a | GAP (M1) |
+| Public repo | <https://github.com/amiya-09/Geospatial-File-Measurement-API> | GitHub Actions | OK (M1) |
 | Optional `Dockerfile` | none | n/a | NOTE (M7) |
