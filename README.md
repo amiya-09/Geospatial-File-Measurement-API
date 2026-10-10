@@ -7,13 +7,17 @@ FastAPI, SQLAlchemy + SQLite, shapely 2, pyproj, pyshp, defusedxml. No GDAL, Geo
 or pyogrio.
 
 > Sections marked **TODO (author)** are left for the author to write.
+> Requirement-by-requirement status (tests, gaps, mismatches): [Requirements traceability](docs/compliance.md).
 
 ## Setup
 
-Requires Python 3.11+ (developed on 3.13).
+Requires Python 3.11 or newer (the test suite passes on 3.11, 3.12 and 3.13). No system
+libraries are needed: every dependency installs from a pip wheel. Dependency versions are not
+pinned; the latest releases are installed.
 
 ```bash
-python -m venv .venv
+git clone <repository-url> geo-measure-api && cd geo-measure-api
+python -m venv .venv      # use python3 if `python` is not on your PATH
 . .venv/bin/activate
 pip install -e ".[dev]"
 ```
@@ -26,17 +30,26 @@ uvicorn app.main:app --port 8000
 
 - Interactive docs: <http://127.0.0.1:8000/docs> (OpenAPI JSON at `/openapi.json`).
 - Health check: `GET /health`.
-- The SQLite file is `geo_api.db` in the working directory; set `GEO_API_DB=/path/to/file.db`
-  to change it. Tables are created at startup.
+- The SQLite file is `geo_api.db` in the directory you start the server from (SQLite also
+  creates `geo_api.db-wal` and `geo_api.db-shm` next to it while running); set
+  `GEO_API_DB=/path/to/file.db` to change it. Tables are created at startup.
+- Limits (upload size 25 MB, ZIP entries, feature and vertex counts, XML depth) are constants in
+  `app/config.py`; only the database path is read from the environment.
 
 Tests, lint and the end-to-end smoke check:
 
 ```bash
 pytest
 ruff check app tests scripts
-bash scripts/smoke.sh        # starts the server on a temp DB, uploads every file in samples/
+bash scripts/smoke.sh        # starts its own server on a temp DB and port, uploads every file in samples/
 python scripts/make_samples.py   # regenerates samples/ (deterministic)
+python scripts/verify_independent.py http://127.0.0.1:8000   # needs a running server (see above)
 ```
+
+Run these with the virtual environment activated: `smoke.sh` uses the `python` on your PATH
+(override with `PYTHON=/path/to/python`). `verify_independent.py` imports nothing from `app`;
+it recomputes every sample feature's area/length with `pyproj.Geod` and prints the API value,
+the Geod value and the percent difference.
 
 `TOTALITY_MUTATIONS=20000 pytest tests/test_parser_totality.py` runs the long fuzz pass over
 both parsers.
