@@ -45,13 +45,15 @@ _DBF_ENCODINGS = {
     "cp1252", "cp1253", "cp1254", "cp1255", "cp1256", "cp1257", "cp1258", "koi8-r", "koi8-u",
     "shift_jis", "euc_jp", "euc_kr", "gbk", "gb2312", "gb18030", "big5", "mac-roman",
 }  # fmt: skip
-_POINT_TYPES = {
-    shapefile.POINT,
-    shapefile.POINTZ,
-    shapefile.POINTM,
-    shapefile.MULTIPOINT,
-    shapefile.MULTIPOINTZ,
-    shapefile.MULTIPOINTM,
+_MULTIPOINT_TYPES = {shapefile.MULTIPOINT, shapefile.MULTIPOINTZ, shapefile.MULTIPOINTM}
+_PART_TYPES = {
+    shapefile.POLYLINE,
+    shapefile.POLYLINEZ,
+    shapefile.POLYLINEM,
+    shapefile.POLYGON,
+    shapefile.POLYGONZ,
+    shapefile.POLYGONM,
+    shapefile.MULTIPATCH,
 }
 
 
@@ -176,6 +178,26 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _declared_counts(shp: bytes, shx: bytes, index: int) -> tuple[int, int]:
+    """(vertices, parts) that shape ``index`` says it holds, read from its record header.
+
+    pyshp builds every point of a shape at once, so the limits are checked on these counts
+    before it reads the shape. The .shx gives the record's offset in 16-bit words; the record
+    content starts after an 8 byte header with the shape type, then a 32 byte box, then the
+    counts. A negative count is passed on as 0 and left for pyshp to reject.
+    """
+    (offset_words,) = struct.unpack_from(">i", shx, 100 + 8 * index)
+    start = offset_words * 2 + 8
+    (shape_type,) = struct.unpack_from("<i", shp, start)
+    if shape_type in _PART_TYPES:
+        parts, vertices = struct.unpack_from("<2i", shp, start + 36)
+    elif shape_type in _MULTIPOINT_TYPES:
+        parts, (vertices,) = 0, struct.unpack_from("<i", shp, start + 36)
+    else:
+        parts, vertices = 0, 0 if shape_type == shapefile.NULL else 1
+    return max(vertices, 0), max(parts, 0)
+
+
 def _read_features(
     members: dict[str, bytes | None],
     encoding: str,
@@ -207,11 +229,11 @@ def _read_features(
             if record is None:  # pyshp returns None for a record flagged deleted
                 warnings.append(f"feature {index}: record is flagged deleted in the .dbf; skipped")
                 continue
+            vertex_count, part_count = _declared_counts(members["shp"], members["shx"], index)
+            budget.take(vertex_count)
+            parts.take(part_count)  # lines or polygon rings; points have none
             raw_shape = reader.shape(index)
             raw_points = getattr(raw_shape, "points", ())
-            budget.take(len(raw_points))
-            if raw_shape.shapeType not in _POINT_TYPES:
-                parts.take(len(getattr(raw_shape, "parts", ())))  # lines or polygon rings
             geometry = None
             if raw_shape.shapeType == shapefile.NULL:
                 warnings.append(f"feature {index}: null shape; no geometry")

@@ -187,6 +187,55 @@ def test_shapefile_part_cap_is_enforced_before_any_shapely_geometry_is_built(mon
         parse_shapefile_zip(zipped, max_parts=3)
 
 
+SIX_VERTICES = [(0, 0), (0, 1), (1, 1), (1, 0.5), (1, 0), (0, 0)]
+SIX_VERTICES_3D = [(x, y, 5) for x, y in SIX_VERTICES]
+ONE_SHAPE_OF_EACH_TYPE = {
+    "line": (shapefile.POLYLINE, lambda w: w.line([SIX_VERTICES])),
+    "linez": (shapefile.POLYLINEZ, lambda w: w.linez([SIX_VERTICES_3D])),
+    "linem": (shapefile.POLYLINEM, lambda w: w.linem([SIX_VERTICES_3D])),
+    "polygon": (shapefile.POLYGON, lambda w: w.poly([SIX_VERTICES])),
+    "polygonz": (shapefile.POLYGONZ, lambda w: w.polyz([SIX_VERTICES_3D])),
+    "multipoint": (shapefile.MULTIPOINT, lambda w: w.multipoint(SIX_VERTICES)),
+    "multipointz": (shapefile.MULTIPOINTZ, lambda w: w.multipointz(SIX_VERTICES_3D)),
+    "multipatch": (
+        shapefile.MULTIPATCH,
+        lambda w: w.multipatch([SIX_VERTICES_3D], partTypes=[shapefile.OUTER_RING]),
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(ONE_SHAPE_OF_EACH_TYPE))
+def test_shapefile_vertex_cap_is_checked_from_the_record_header_before_pyshp_reads_the_shape(
+    kind, monkeypatch
+):
+    # pyshp builds all points of a shape at once: a 233 KB ZIP holding one 6,000,000 point
+    # line used 1.1 GB before the limit could reject it. Z and M values are not vertices.
+    shape_type, write = ONE_SHAPE_OF_EACH_TYPE[kind]
+    parts = shapefile_parts(lambda w: (write(w), w.record(kind)), shape_type)
+    zipped = shapefile_zip(parts, prj=None)
+    assert len(parse_shapefile_zip(zipped, max_vertices=6).features) == 1
+
+    def boom(*args, **kwargs):
+        raise AssertionError("pyshp read the shape before the vertex limit was checked")
+
+    monkeypatch.setattr(shapefile.Reader, "shape", boom)
+    with pytest.raises(ParseError, match="more than 5 vertices"):
+        parse_shapefile_zip(zipped, max_vertices=5)
+
+
+def test_shapefile_part_cap_is_checked_from_the_record_header_before_pyshp_reads_the_shape(
+    monkeypatch,
+):
+    zipped = multi_line_zip([4])
+
+    def boom(*args, **kwargs):
+        raise AssertionError("pyshp read the shape before the part limit was checked")
+
+    monkeypatch.setattr(shapefile.Reader, "shape", boom)
+    with pytest.raises(ParseError, match="more than 3 parts"):
+        parse_shapefile_zip(zipped, max_parts=3)
+
+
 def test_zip_limits_can_still_be_passed_through_parse_shapefile_zip():
     with pytest.raises(ParseError, match="entries"):
         parse_shapefile_zip(point_zip(1), max_entries=1)
