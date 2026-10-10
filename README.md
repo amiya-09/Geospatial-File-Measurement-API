@@ -265,6 +265,12 @@ For each feature with geometry:
 - Accuracy limits: straight edges are projected, not geodesic, so very large shapes differ
   slightly from a geodesic calculation (a 10-degree box: about -0.4% area).
 
+## Known limitations and deviations
+
+**TODO (author).**
+
+- mypy is not run in CI, and running it on `app/` reports 7 findings that are left as they are (shapely's type stubs are stricter than how the code calls shapely, pyshp ships no type stubs, and the shapefile reader types file contents as `bytes | None`).
+
 ## Design decisions and alternatives
 
 **TODO (author).** See `docs/decisions.md` for the skeleton.
