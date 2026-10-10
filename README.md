@@ -315,8 +315,6 @@ For each feature with geometry:
   its geometry (up to 10,000 features).
 - Lines shorter than roughly half a millimetre measure exactly 0 m, because the azimuthal
   equidistant projection snaps points that close to its centre.
-- A 405 response's `Allow` header lists the methods of the first matching route only:
-  `DELETE /api/files/` returns `Allow: POST`, although GET works on that path too.
 - mypy is not run in CI, and running it on `app/` reports 7 findings that are left as they are (shapely's type stubs are stricter than how the code calls shapely, pyshp ships no type stubs, and the shapefile reader types file contents as `bytes | None`).
 
 ## Design decisions and alternatives

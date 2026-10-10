@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Match
 
 from app.db.session import BUSY_TIMEOUT_MS
 
@@ -62,6 +63,23 @@ def _describe(err: dict[str, Any]) -> str:
     return f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
 
 
+_METHODS = ("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT")
+
+
+def _allowed_methods(request: Request) -> str:
+    """Methods some route accepts at this request's path, found by asking every route.
+
+    FastAPI keeps included routers as nested route objects, so asking each method in turn is
+    simpler and safer than reading the routes' method sets.
+    """
+    allowed = []
+    for method in _METHODS:
+        scope = {**request.scope, "method": method}
+        if any(route.matches(scope)[0] == Match.FULL for route in request.app.router.routes):
+            allowed.append(method)
+    return ", ".join(allowed)
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def api_error(_: Request, exc: ApiError) -> JSONResponse:
@@ -78,11 +96,16 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(_body("validation_error", problems), status_code=422)
 
     @app.exception_handler(StarletteHTTPException)
-    async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+    async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _HTTP_CODES.get(exc.status_code, "http_error")
-        # Keep headers Starlette sets, e.g. Allow on a 405 (required by RFC 9110).
+        # Keep headers Starlette sets. Allow on a 405 is required by RFC 9110, but Starlette
+        # fills it from the first matching route only, so a path served by two routes
+        # (GET and POST /api/files/) would advertise one method. List all of them.
+        headers = exc.headers
+        if exc.status_code == 405:
+            headers = {**(exc.headers or {}), "Allow": _allowed_methods(request)}
         return JSONResponse(
-            _body(code, str(exc.detail)), status_code=exc.status_code, headers=exc.headers
+            _body(code, str(exc.detail)), status_code=exc.status_code, headers=headers
         )
 
     # SQLite allows one writer at a time. Under heavy load a request can wait too long for the

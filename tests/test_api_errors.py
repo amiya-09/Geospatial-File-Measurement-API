@@ -46,14 +46,18 @@ def test_wrong_method_uses_the_error_shape():
     assert resp.json()["error"]["code"] == "method_not_allowed"
 
 
-def test_wrong_method_keeps_the_allow_header():
-    # RFC 9110 requires Allow on a 405; Starlette sets it and our handler must keep it.
-    # Starlette lists only the methods of the first route whose path matches, so a path served
-    # by two routes (GET and POST /api/files/) reports one of them. That is Starlette's choice.
+def test_wrong_method_lists_every_allowed_method_in_the_allow_header():
+    # RFC 9110: a 405 must carry Allow with all methods the resource supports. Starlette lists
+    # only the first route whose path matches, which for /api/files/ (POST and GET routes) gave
+    # "Allow: POST" alone; schemathesis flagged the missing GET on OPTIONS.
     client = TestClient(create_app())
     assert client.post("/health").headers["allow"] == "GET"
     assert client.put("/api/files/00000000-0000-0000-0000-000000000000/").headers["allow"] == "GET"
-    assert client.delete("/api/files/").headers["allow"] in {"GET", "POST"}
+    for method in ("DELETE", "OPTIONS", "PUT", "PATCH"):
+        resp = client.request(method, "/api/files/")
+        assert resp.status_code == 405
+        assert resp.headers["allow"] == "GET, POST"
+        assert resp.json()["error"]["code"] == "method_not_allowed"
 
 
 def test_fastapi_validation_errors_use_the_error_shape_without_echoing_input():
