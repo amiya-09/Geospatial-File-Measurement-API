@@ -183,8 +183,7 @@ def measure(geom: BaseGeometry) -> Measurement:
         polys = _repair(polys)
         repaired_to_nothing = not polys
 
-    unsupported = [p for p in others if not isinstance(p, Point)]
-    unsupported += [p for p in lines if p.geom_type == "LinearRing"]
+    unsupported = [p for p in others if not isinstance(p, Point)]  # e.g. a bare LinearRing
 
     area_m2 = length_m = area_crs = length_crs = None
     if polys:

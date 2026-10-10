@@ -228,7 +228,7 @@ def parse_kml(
             # all before any geometry of this Placemark is built.
             parts.take(sum(1 for e in el.iter() if _local(e.tag) in _PART_TAGS))
             geometry = _placemark_geometry(el, budget)
-        except (_GeometryError, RecursionError) as exc:
+        except _GeometryError as exc:
             geometry = None
             warnings.append(f"Placemark {index}: {exc}; geometry skipped")
         features.append(

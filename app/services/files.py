@@ -160,9 +160,8 @@ def create_file(session: Session, filename: str | None, data: bytes) -> FileReco
     with processing_slot():
         try:
             fmt, parsed = parse_upload(data)
-        except UnmeasurableError as exc:  # raised by parsers; format is known from the signature
-            fmt = "shapefile" if data.startswith(ZIP_SIGNATURE) else "kml"
-            raise _fail(session, filename, fmt, None, exc) from exc
+        except UnmeasurableError as exc:  # only the shapefile parser raises it (.prj problems)
+            raise _fail(session, filename, "shapefile", None, exc) from exc
         file_id = str(uuid.uuid4())
         try:
             rows, warnings, label = _measure_features(parsed, file_id)

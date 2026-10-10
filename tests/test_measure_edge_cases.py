@@ -73,8 +73,16 @@ def test_an_empty_part_inside_a_collection_is_skipped(empty):
     assert m.part_count == 2
 
 
-def test_unsupported_geometry_type_is_reported_not_raised():
-    m = measure(LinearRing([(0, 0), (1, 0), (1, 1)]))
+@pytest.mark.parametrize(
+    "geom",
+    [
+        LinearRing([(0, 0), (1, 0), (1, 1)]),
+        GeometryCollection([LinearRing([(0, 0), (1, 0), (1, 1)]), Point(1, 1)]),
+    ],
+    ids=["ring", "ring-in-collection"],
+)
+def test_unsupported_geometry_type_is_reported_not_raised(geom):
+    m = measure(geom)
     assert m.area_m2 is None and m.length_m is None
     assert m.reason == "unsupported"
 
