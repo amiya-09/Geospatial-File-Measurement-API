@@ -35,6 +35,16 @@ ZIP_SIGNATURE = b"PK\x03\x04"
 _MEMBER_EXTENSIONS = {".shp", ".shx", ".dbf", ".prj", ".cpg"}
 _REQUIRED = ("shp", "shx", "dbf")
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+# Text encodings a .dbf can use, by their codecs.lookup() name.
+_DBF_ENCODINGS = {
+    "utf-8", "utf-8-sig", "ascii", "iso8859-1", "iso8859-2", "iso8859-3", "iso8859-4",
+    "iso8859-5", "iso8859-6", "iso8859-7", "iso8859-8", "iso8859-9", "iso8859-10",
+    "iso8859-11", "iso8859-13", "iso8859-14", "iso8859-15", "iso8859-16", "cp437", "cp737",
+    "cp775", "cp850", "cp852", "cp855", "cp857", "cp860", "cp861", "cp862", "cp863", "cp864",
+    "cp865", "cp866", "cp869", "cp874", "cp932", "cp949", "cp950", "cp1250", "cp1251",
+    "cp1252", "cp1253", "cp1254", "cp1255", "cp1256", "cp1257", "cp1258", "koi8-r", "koi8-u",
+    "shift_jis", "euc_jp", "euc_kr", "gbk", "gb2312", "gb18030", "big5", "mac-roman",
+}  # fmt: skip
 _POINT_TYPES = {
     shapefile.POINT,
     shapefile.POINTZ,
@@ -133,17 +143,24 @@ def read_zip_members(
 
 
 def _encoding_from_cpg(cpg: bytes | None, warnings: list[str]) -> str:
-    """Codec named by the .cpg file, else UTF-8. An unrecognised name is warned about."""
+    """Codec named by the .cpg file, else UTF-8. An unrecognised name is warned about.
+
+    Only byte-oriented text encodings are accepted: codecs.lookup also knows base64, rot13,
+    zlib and UTF-16, which cannot decode a .dbf.
+    """
     if cpg is None:
         return "utf-8"
     name = cpg.decode("ascii", errors="ignore").strip()
     if name.isdigit():
         name = f"cp{name}"  # Windows code page number, e.g. "1252"
     try:
-        return codecs.lookup(name).name
+        canonical = codecs.lookup(name).name
     except (LookupError, ValueError):  # unknown codec name, or a name with a NUL byte
+        canonical = None
+    if canonical not in _DBF_ENCODINGS:
         warnings.append(f"unrecognised encoding {name!r} in .cpg; assuming UTF-8")
         return "utf-8"
+    return canonical
 
 
 def _is_decode_error(exc: BaseException) -> bool:

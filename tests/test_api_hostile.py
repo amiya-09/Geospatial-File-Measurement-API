@@ -137,3 +137,9 @@ def test_successful_hostile_looking_uploads_stay_readable(client):
     for data in (SURVEY_KML, utm_polygon_zip()):
         fid = upload(client, data).json()["id"]
         assert client.get(f"/api/files/{fid}/measurements/").status_code == 200
+
+
+def test_cpg_naming_base64_is_not_a_500(client):
+    resp = upload(client, shapefile_zip(SHAPEFILES["points"], prj=WGS84_PRJ, cpg="base64"))
+    assert resp.status_code == 201
+    assert any(".cpg" in w for w in resp.json()["warnings"])

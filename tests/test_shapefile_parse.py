@@ -150,6 +150,16 @@ def test_latin1_attributes_without_cpg_fall_back_with_a_warning():
     assert any("latin-1" in w for w in parsed.warnings)
 
 
+@pytest.mark.parametrize("name", ["base64", "rot13", "hex", "zlib", "utf-16", "UTF\x008"])
+def test_cpg_naming_something_other_than_a_byte_text_encoding_is_ignored_with_a_warning(name):
+    # codecs.lookup accepts base64, rot13 and friends, which then crashed the .dbf decode.
+    parts = points([(1, 1)], records=[["plain"]])
+    zipped = shapefile_zip(parts, prj=WGS84_PRJ, extra={"data.cpg": name.encode()})
+    parsed = parse_shapefile_zip(zipped)
+    assert parsed.features[0].properties["name"] == "plain"
+    assert any(".cpg" in w for w in parsed.warnings)
+
+
 def test_unknown_cpg_is_ignored_with_a_warning():
     parts = points([(1, 1)], records=[["plain"]])
     parsed = parse(parts, cpg="NOT-A-CODEC")
