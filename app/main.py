@@ -27,8 +27,9 @@ def create_app() -> FastAPI:
     app.add_middleware(BodyLimitMiddleware)
     app.include_router(files_router)
 
+    # async: runs on the event loop, so it answers even when every worker thread is busy.
     @app.get("/health")
-    def health() -> dict[str, str]:
+    async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     return app
