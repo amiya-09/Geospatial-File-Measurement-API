@@ -452,8 +452,8 @@ Limits and known problems:
   multipart body to a temporary file before the route runs. So a request of up to 25 MB plus
   64 KiB reaches the disk before the cap applies (M11).
 - The body middleware has a sharp edge. When a chunked upload (no `Content-Length`) passes the
-  limit, it cannot simply raise an error, because FastAPI turns that exception into a 400 (seen
-  in Stage D). Instead it tells the app that the client disconnected, throws away whatever the app
+  limit, it cannot simply raise an error, because FastAPI turns that exception into a 400 (found
+  while testing chunked uploads). Instead it tells the app that the client disconnected, throws away whatever the app
   sends, and sends its own 413. It can only do that if the app has not started its response yet. The upload
   route never answers before the whole body is read, but a route that did would send a cut off
   response (read from the code, not tested). The middleware's limit is 64 KiB above
