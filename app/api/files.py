@@ -111,7 +111,8 @@ def get_file(file_id: uuid.UUID, session: SessionDep):
     description=(
         "Features come back in file order with a stable `index`. Geometry is GeoJSON in "
         "EPSG:4326 whatever the source CRS; `crs` is the source CRS. Each measured value "
-        "carries its unit and the local CRS used. Pass `include_geometry=false` to omit geometry."
+        "carries its unit and the local CRS used. Pass `include_geometry=false` to omit geometry; "
+        "`limit` (1-1000) and `offset` page through the features and `total` is the full count."
     ),
     responses=_errors(
         (404, "No such file", "not_found", "file not found"),
@@ -127,6 +128,8 @@ def get_measurements(
     file_id: uuid.UUID,
     session: SessionDep,
     include_geometry: Annotated[bool, Query(description="Include GeoJSON geometry")] = True,
+    limit: Annotated[int | None, Query(ge=1, le=1000, description="Page size")] = None,
+    offset: Annotated[int, Query(ge=0, description="Features to skip")] = 0,
 ):
     record = _load(session, file_id)
     if record.status == service.FAILED:
@@ -144,8 +147,13 @@ def get_measurements(
             warnings=f.warnings,
             geometry=f.geometry if include_geometry else None,
         )
-        for f in repository.get_features(session, record.id)
+        for f in repository.get_features(session, record.id, limit, offset)
     ]
     return MeasurementsResponse(
-        file_id=record.id, crs=record.crs, feature_count=len(features), features=features
+        file_id=record.id,
+        crs=record.crs,
+        total=repository.count_features(session, record.id),
+        limit=limit,
+        offset=offset,
+        features=features,
     )

@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class FileInfo(BaseModel):
@@ -40,6 +40,13 @@ class FileListItem(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_serializer("created_at")
+    def _utc_z(self, value: datetime) -> str:
+        # SQLite hands back naive datetimes; everything stored is UTC.
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
 
 class MeasurementOut(BaseModel):
     area_m2: float | None = None
@@ -67,7 +74,9 @@ class FeatureOut(BaseModel):
 class MeasurementsResponse(BaseModel):
     file_id: str
     crs: str | None
-    feature_count: int
+    total: int = Field(description="Features in the file, whatever limit/offset were used")
+    limit: int | None = Field(description="The limit asked for; null means no limit")
+    offset: int
     features: list[FeatureOut]
 
     model_config = ConfigDict(
@@ -75,7 +84,9 @@ class MeasurementsResponse(BaseModel):
             "example": {
                 "file_id": "3f2b8c1e-5a47-4d0e-9a52-1c7f4e6b9d10",
                 "crs": "EPSG:4326",
-                "feature_count": 1,
+                "total": 1,
+                "limit": None,
+                "offset": 0,
                 "features": [
                     {
                         "index": 0,

@@ -398,3 +398,64 @@ def test_list_files_includes_failed_uploads(client):
     assert [(r["filename"], r["status"], r["feature_count"]) for r in rows] == [
         ("bad.zip", "FAILED", 0)
     ]
+
+
+def test_created_at_is_utc_iso_8601_with_a_z_suffix(client):
+    import re
+    from datetime import UTC, datetime, timedelta
+
+    before = datetime.now(UTC) - timedelta(seconds=5)
+    upload(client, SURVEY_KML)
+    stamp = client.get("/api/files/").json()[0]["created_at"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z", stamp), stamp
+    parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    assert before <= parsed <= datetime.now(UTC) + timedelta(seconds=5)
+
+
+# ---- measurements paging ----
+
+
+def _paged(client, fid, query=""):
+    resp = client.get(f"/api/files/{fid}/measurements/{query}", follow_redirects=False)
+    return resp
+
+
+def test_measurements_report_total_and_default_to_everything(client):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    body = _paged(client, fid).json()
+    assert body["total"] == 4 and len(body["features"]) == 4
+    assert (body["limit"], body["offset"]) == (None, 0)
+
+
+def test_measurements_limit_and_offset_page_through_in_index_order(client):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    first = _paged(client, fid, "?limit=2").json()
+    second = _paged(client, fid, "?limit=2&offset=2").json()
+    assert [f["index"] for f in first["features"]] == [0, 1]
+    assert [f["index"] for f in second["features"]] == [2, 3]
+    assert first["total"] == second["total"] == 4
+    assert (second["limit"], second["offset"]) == (2, 2)
+    assert _paged(client, fid, "?offset=3").json()["features"][0]["index"] == 3
+    past_end = _paged(client, fid, "?offset=10").json()
+    assert past_end["features"] == [] and past_end["total"] == 4
+
+
+def test_measurements_paging_combines_with_include_geometry(client):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    page = _paged(client, fid, "?limit=1&offset=2&include_geometry=false").json()
+    assert [f["index"] for f in page["features"]] == [2]
+    assert page["features"][0]["geometry"] is None
+
+
+@pytest.mark.parametrize(
+    "query", ["?limit=0", "?limit=1001", "?limit=-1", "?offset=-1", "?limit=x"]
+)
+def test_measurements_paging_bounds_are_validated(client, query):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    resp = _paged(client, fid, query)
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "validation_error"
+
+
+def test_measurements_limit_1000_is_accepted(client):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    assert _paged(client, fid, "?limit=1000").status_code == 200
