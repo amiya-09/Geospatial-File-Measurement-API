@@ -140,7 +140,8 @@ def _placemark_geometry(placemark: Element, budget: VertexBudget) -> BaseGeometr
     elements = [c for c in placemark if _local(c.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS]
     if not elements:
         raise _GeometryError("no geometry")
-    # A <MultiGeometry> keeps its Multi* type even with one child; a bare geometry does not.
+    # A single bare geometry is returned as is. A <MultiGeometry> is flattened and recombined,
+    # so one with a single child returns that child's own type (Point, not MultiPoint).
     if len(elements) == 1 and _local(elements[0].tag) != "MultiGeometry":
         return _simple_geometries(elements[0], budget)[0]
     parts = [g for el in elements for g in _simple_geometries(el, budget)]

@@ -101,6 +101,24 @@ def test_multigeometry_with_mixed_types_becomes_a_geometry_collection():
     assert {g.geom_type for g in feature.geometry.geoms} == {"Point", "LineString"}
 
 
+@pytest.mark.parametrize(
+    ("child", "expected"),
+    [
+        ("<Point><coordinates>1,1</coordinates></Point>", "Point"),
+        ("<LineString><coordinates>0,0 1,0</coordinates></LineString>", "LineString"),
+        (
+            f"<Polygon><outerBoundaryIs><LinearRing><coordinates>{RING}</coordinates>"
+            "</LinearRing></outerBoundaryIs></Polygon>",
+            "Polygon",
+        ),
+    ],
+)
+def test_multigeometry_with_one_child_returns_the_child_type(child, expected):
+    feature, parsed = one(placemark(f"<MultiGeometry>{child}</MultiGeometry>"))
+    assert feature.geometry.geom_type == expected
+    assert parsed.warnings == []
+
+
 def test_multigeometry_of_lines_skips_non_geometry_children():
     mg = (
         "<MultiGeometry><name>not a geometry</name>"
