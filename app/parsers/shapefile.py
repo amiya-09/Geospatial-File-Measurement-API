@@ -29,7 +29,7 @@ from app.parsers.base import Feature, ParsedFile, ParseError, UnmeasurableError,
 
 WGS84 = CRS.from_epsg(4326)
 
-_ZIP_SIGNATURE = b"PK\x03\x04"
+ZIP_SIGNATURE = b"PK\x03\x04"
 _MEMBER_EXTENSIONS = {".shp", ".shx", ".dbf", ".prj", ".cpg"}
 _REQUIRED = ("shp", "shx", "dbf")
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
@@ -59,7 +59,7 @@ def read_zip_members(
     """
     if len(data) > max_compressed:
         raise ParseError(f"file is too large ({len(data)} bytes, limit {max_compressed})")
-    if not data.startswith(_ZIP_SIGNATURE):
+    if not data.startswith(ZIP_SIGNATURE):
         raise ParseError("not a ZIP archive (missing PK signature)")
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))

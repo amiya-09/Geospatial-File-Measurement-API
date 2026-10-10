@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.files import router as files_router
 from app.db.session import get_engine, init_db
 from app.errors import install_error_handlers
 
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     install_error_handlers(app)
+    app.include_router(files_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

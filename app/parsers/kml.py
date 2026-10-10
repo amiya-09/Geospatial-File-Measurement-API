@@ -28,6 +28,11 @@ from shapely.geometry.base import BaseGeometry
 from app.config import MAX_FEATURES, MAX_VERTICES, MAX_XML_DEPTH
 from app.parsers.base import Feature, ParsedFile, ParseError, VertexBudget
 
+
+class NotKmlError(ParseError):
+    """Well-formed XML, but the root element is not <kml>: some other kind of file."""
+
+
 WGS84 = CRS.from_epsg(4326)
 
 _GEOMETRY_TAGS = {"Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"}
@@ -202,7 +207,7 @@ def parse_kml(
         raise ParseError("file is empty")
     root = _parse_xml(data, max_depth)
     if _local(root.tag) != "kml":
-        raise ParseError(f"not a KML file: root element is <{_local(root.tag)}>, expected <kml>")
+        raise NotKmlError(f"not a KML file: root element is <{_local(root.tag)}>, expected <kml>")
 
     features: list[Feature] = []
     warnings: list[str] = []
