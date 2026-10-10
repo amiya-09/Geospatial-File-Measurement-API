@@ -23,7 +23,7 @@ EXPECTED_STATUS = {
     "bad_corrupt.zip": 400,
     "bad_zip_slip.zip": 400,
     "bad_no_prj.zip": 422,
-    "bad_coordinates.kml": 422,
+    "bad_coordinates.kml": 201,  # kept, with no geometry and an out of range warning
 }
 
 KML_HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n'

@@ -11,9 +11,6 @@ from shapely.geometry.base import BaseGeometry
 from app import config
 from app.geo.crs import project_local
 
-# Slack for float noise from reprojection (~0.1 m); anything beyond is not lon/lat.
-_RANGE_TOLERANCE_DEG = 1e-6
-
 
 class MeasurementError(ValueError):
     """The geometry cannot be measured at all (e.g. coordinates are not lon/lat)."""
@@ -118,12 +115,12 @@ def _repair(polys: list[Polygon]) -> list[Polygon]:
 
 def _check_lon_lat(geom: BaseGeometry) -> None:
     minx, miny, maxx, maxy = geom.bounds
-    tol = _RANGE_TOLERANCE_DEG
     # Bounds ignore NaN vertices and NaN compares False against every bound, so check the
     # coordinates themselves.
     if not np.isfinite(shapely.get_coordinates(geom)).all():
         raise MeasurementError("coordinates are not finite numbers")
-    if minx < -180 - tol or maxx > 180 + tol or miny < -90 - tol or maxy > 90 + tol:
+    # No tolerance: a latitude even slightly past a pole projects to infinity.
+    if minx < -180 or maxx > 180 or miny < -90 or maxy > 90:
         raise MeasurementError(
             f"coordinates are not valid lon/lat degrees (bounds: {minx}, {miny}, {maxx}, {maxy})"
         )

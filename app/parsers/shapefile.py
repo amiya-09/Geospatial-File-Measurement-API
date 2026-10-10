@@ -8,6 +8,7 @@ import re
 import struct
 import zipfile
 import zlib
+from dataclasses import replace
 from posixpath import splitext
 from typing import Any
 
@@ -273,6 +274,20 @@ def parse_shapefile_zip(
     ) as exc:
         raise ParseError(f"could not read the shapefile: {exc}") from exc
     warnings += read_warnings
-    return ParsedFile(
-        crs=_resolve_crs(members["prj"], features, warnings), features=features, warnings=warnings
+    crs = _resolve_crs(members["prj"], features, warnings)
+    if crs.is_geographic and all(a.unit_name.lower() == "degree" for a in crs.axis_info):
+        features = [_drop_if_out_of_range(f, warnings) for f in features]
+    return ParsedFile(crs=crs, features=features, warnings=warnings)
+
+
+def _drop_if_out_of_range(feature: Feature, warnings: list[str]) -> Feature:
+    """For lon/lat data: a coordinate past +/-180 or +/-90 makes the geometry unusable."""
+    if feature.geometry is None or feature.geometry.is_empty:
+        return feature
+    minx, miny, maxx, maxy = feature.geometry.bounds
+    if -180 <= minx and maxx <= 180 and -90 <= miny and maxy <= 90:
+        return feature
+    warnings.append(
+        f"feature {feature.index}: coordinates are out of the lon/lat range; no geometry"
     )
+    return replace(feature, geometry=None)

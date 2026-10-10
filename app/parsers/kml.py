@@ -78,6 +78,8 @@ def _coordinates(el: Element, budget: Budget) -> list[tuple[float, float]]:
             raise _GeometryError(f"bad coordinate {token!r}") from None
         if not all(math.isfinite(v) for v in values):
             raise _GeometryError(f"non-finite coordinate {token!r}")
+        if not (-180 <= values[0] <= 180 and -90 <= values[1] <= 90):
+            raise _GeometryError(f"coordinate {token!r} is out of the lon/lat range")
         points.append((values[0], values[1]))
     if not points:
         raise _GeometryError("empty <coordinates>")

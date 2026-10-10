@@ -199,15 +199,16 @@ def test_unmeasurable_shapefile_is_422_and_leaves_a_readable_failed_record(clien
 
 
 @pytest.mark.parametrize("coords", ["200,10", "10,95"])
-def test_kml_with_coordinates_outside_lon_lat_is_422_with_a_failed_record(client, coords):
+def test_kml_coordinates_outside_lon_lat_drop_that_geometry_with_a_warning(client, coords):
     data = kml(placemark("far", f"<Point><coordinates>{coords}</coordinates></Point>"))
     resp = upload(client, data, "far.kml")
-    assert resp.status_code == 422
-    err = resp.json()["error"]
-    assert err["code"] == "unmeasurable_file" and "feature 0" in err["message"]
-    info = client.get(f"/api/files/{err['file_id']}/").json()
-    assert info["status"] == "FAILED" and info["format"] == "kml"
-    assert info["crs"] == "EPSG:4326"
+    assert resp.status_code == 201
+    assert any(
+        "Placemark 0" in w and "out of the lon/lat range" in w for w in resp.json()["warnings"]
+    )
+    (feature,) = client.get(f"/api/files/{resp.json()['id']}/measurements/").json()["features"]
+    assert feature["geometry"] is None
+    assert feature["measurement"]["reason"] == "no geometry"
 
 
 def test_unknown_id_is_404_on_both_get_routes(client):
