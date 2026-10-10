@@ -128,3 +128,10 @@ def test_list_files_newest_first_with_paging(session_factory):
     with session_factory() as session:
         assert [f.id for f in repository.list_files(session, limit=2, offset=0)] == ids[::-1][:2]
         assert [f.id for f in repository.list_files(session, limit=2, offset=2)] == ids[::-1][2:]
+
+
+def test_connections_use_wal_and_a_long_busy_timeout(engine):
+    with engine.connect() as conn:
+        assert conn.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+        assert conn.execute(text("PRAGMA busy_timeout")).scalar() >= 30_000
+        assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 1
