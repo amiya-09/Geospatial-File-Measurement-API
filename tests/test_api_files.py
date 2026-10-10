@@ -461,6 +461,26 @@ def test_measurements_limit_1000_is_accepted(client):
     assert _paged(client, fid, "?limit=1000").status_code == 200
 
 
+# SQLite integers are signed 64 bit. Found by schemathesis: a larger offset was a 500.
+SQLITE_MAX_INT = 2**63 - 1
+
+
+def test_offset_up_to_the_sqlite_integer_limit_is_an_empty_page(client):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    assert client.get(f"/api/files/?offset={SQLITE_MAX_INT}").json() == []
+    assert _paged(client, fid, f"?offset={SQLITE_MAX_INT}").json()["features"] == []
+
+
+def test_offset_beyond_the_sqlite_integer_limit_is_422_not_500(client):
+    fid = upload(client, SURVEY_KML).json()["id"]
+    for resp in (
+        client.get(f"/api/files/?offset={SQLITE_MAX_INT + 1}"),
+        _paged(client, fid, f"?offset={SQLITE_MAX_INT + 1}"),
+    ):
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "validation_error"
+
+
 # ---- unsupported geometry is handled gracefully (assignment section 3) ----
 
 

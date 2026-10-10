@@ -15,6 +15,8 @@ from app.services import files as service
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
+# SQLite integers are signed 64 bit; a larger OFFSET cannot even be sent to the database.
+MAX_OFFSET = 2**63 - 1
 
 
 def _error_example(code: str, message: str, **extra: str) -> dict:
@@ -95,7 +97,7 @@ def upload_file(session: SessionDep, file: Annotated[UploadFile, File(descriptio
 def list_files(
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=MAX_OFFSET)] = 0,
 ):
     return repository.list_files(session, limit, offset)
 
@@ -135,7 +137,7 @@ def get_measurements(
     session: SessionDep,
     include_geometry: Annotated[bool, Query(description="Include GeoJSON geometry")] = True,
     limit: Annotated[int | None, Query(ge=1, le=1000, description="Page size")] = None,
-    offset: Annotated[int, Query(ge=0, description="Features to skip")] = 0,
+    offset: Annotated[int, Query(ge=0, le=MAX_OFFSET, description="Features to skip")] = 0,
 ):
     record = _load(session, file_id)
     if record.status == service.FAILED:
