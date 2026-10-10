@@ -6,8 +6,7 @@ Every requirement of the assignment ("Geospatial File Measurement API", sections
 Status: **OK** implemented and tested. **GAP** not done or only partly done. **NOTE** works,
 but differs from the wording of the spec or plan in a way worth knowing.
 
-The assignment document is no longer in the project files; this table was built from the text
-extracted from it at the start of the project.
+This matrix was checked against the original assignment document on 2026-10-10.
 
 ## Mismatches and gaps (read this first)
 
