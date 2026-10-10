@@ -60,3 +60,16 @@ def test_feature_spanning_the_whole_circle_is_422_with_a_failed_record(client):
     assert "more than 180 degrees" in err["message"]
     info = client.get(f"/api/files/{err['file_id']}/").json()
     assert info["status"] == "FAILED"
+
+
+def test_wrapped_box_plus_a_far_box_in_one_multigeometry_is_the_sum_of_both(client):
+    far_m2 = abs(GEOD.polygon_area_perimeter([10, 11, 11, 10], [-1, -1, 1, 1])[0])
+    multi = (
+        "<MultiGeometry>"
+        + polygon_kml("179,-1 -179,-1 -179,1 179,1 179,-1")
+        + polygon_kml("10,-1 11,-1 11,1 10,1 10,-1")
+        + "</MultiGeometry>"
+    )
+    _, (feature,) = measurements(client, kml(placemark("fiji and friend", multi)))
+    assert feature["measurement"]["area_m2"] == pytest.approx(TRUE_BOX_M2 + far_m2, rel=0.001)
+    assert feature["is_valid"] is True

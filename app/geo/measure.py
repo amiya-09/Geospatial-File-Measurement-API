@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import shapely
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from app.geo.crs import project_local
@@ -87,23 +87,40 @@ def _unwrap_antimeridian(part: BaseGeometry) -> tuple[BaseGeometry, bool]:
     return part, False
 
 
-def _measure_parts(parts: Sequence[BaseGeometry], kind: str) -> tuple[float, str, int]:
+def _measure_parts(parts: Sequence[BaseGeometry], kind: str) -> tuple[float, str]:
     """Sum the measure of each part, each in its own local projection.
 
-    Returns (total, crs label, number of parts unwrapped across the antimeridian). Parts are
-    never projected together: a shared projection centred between distant parts would be
-    accurate for none of them.
+    Returns (total, crs label). Parts are never projected together: a shared projection
+    centred between distant parts would be accurate for none of them.
     """
-    total, crs_strings, unwrapped = 0.0, [], 0
+    total, crs_strings = 0.0, []
     for part in parts:
-        part, shifted = _unwrap_antimeridian(part)
-        unwrapped += shifted
         projected, crs = project_local(part, kind)
         total += projected.area if kind == "laea" else projected.length
         crs_strings.append(crs.srs)
     if len(parts) == 1:
-        return total, crs_strings[0], unwrapped
-    return total, f"local +proj={kind} per part ({len(parts)} parts)", unwrapped
+        return total, crs_strings[0]
+    return total, f"local +proj={kind} per part ({len(parts)} parts)"
+
+
+def _repair(polys: list[Polygon]) -> tuple[list[Polygon], str | None]:
+    """Repair a feature's polygons together, as one multipolygon.
+
+    The "structure" method unions overlapping polygons and subtracts holes, so a polygon
+    written twice counts once. Returns the polygonal pieces and a warning when the repaired
+    area differs from the sum of the polygons as written.
+    """
+    shape = polys[0] if len(polys) == 1 else MultiPolygon(polys)
+    repaired = shapely.make_valid(shape, method="structure", keep_collapsed=False)
+    pieces = [p for p in _parts(repaired) if isinstance(p, Polygon) and not p.is_empty]
+    before = _measure_parts(polys, "laea")[0]
+    after = _measure_parts(pieces, "laea")[0] if pieces else 0.0
+    if abs(after - before) <= 1e-6 * max(abs(after), abs(before)):
+        return pieces, None
+    return pieces, (
+        f"repair changed the area: the polygons as written sum to {before:,.0f} m2, "
+        f"the repaired shape is {after:,.0f} m2"
+    )
 
 
 def _check_lon_lat(geom: BaseGeometry) -> None:
@@ -122,10 +139,11 @@ def _check_lon_lat(geom: BaseGeometry) -> None:
 def measure(geom: BaseGeometry) -> Measurement:
     """Measure a geometry given in EPSG:4326 (lon, lat).
 
-    Polygons give area, lines give length, points give nothing. Each part of a
-    multi-geometry is measured separately and the parts are summed. Invalid polygonal
-    geometries are repaired with make_valid and only the polygonal pieces are
-    measured; validity is reported either way.
+    Polygons give area, lines give length, points give nothing. Each part is unwrapped
+    across the antimeridian first. All polygons of the geometry (including those inside a
+    mixed collection) are then checked together and, if invalid, repaired together with
+    make_valid. Each resulting part is measured in its own projection and the parts are
+    summed; validity is reported either way.
     """
     geom = shapely.force_2d(geom)
 
@@ -133,38 +151,59 @@ def measure(geom: BaseGeometry) -> Measurement:
         return Measurement(None, None, True, None, "empty geometry")
     _check_lon_lat(geom)
 
-    is_valid = geom.is_valid
-    validity_reason = None if is_valid else shapely.is_valid_reason(geom)
+    # Unwrap every part first: a shape that crosses 180 only looks invalid in raw lon/lat,
+    # so validity and repair must see the unwrapped coordinates.
+    polys: list[Polygon] = []
+    lines: list[BaseGeometry] = []
+    others: list[BaseGeometry] = []
+    unwrapped = 0
+    for part in _parts(geom):
+        if isinstance(part, Polygon) or part.geom_type == "LineString":
+            part, shifted = _unwrap_antimeridian(part)
+            unwrapped += shifted
+        if isinstance(part, Polygon):
+            polys.append(part)
+        elif part.geom_type == "LineString":
+            lines.append(part)
+        else:
+            others.append(part)
 
-    parts = list(_parts(geom))
-    if not is_valid and all(isinstance(p, Polygon) for p in parts):
-        parts = [p for p in _parts(shapely.make_valid(geom)) if isinstance(p, Polygon)]
-        if not parts:
-            return Measurement(None, None, False, validity_reason, "no polygonal area after repair")
+    # The polygons of one feature are judged together, whatever else the feature holds, so
+    # overlapping members count as invalid and are repaired as one multipolygon.
+    polygonal = (polys[0] if len(polys) == 1 else MultiPolygon(polys)) if polys else None
+    checked = ([polygonal] if polygonal is not None else []) + lines
+    invalid = next((g for g in checked if not g.is_valid), None)
+    is_valid = invalid is None
+    validity_reason = None if invalid is None else shapely.is_valid_reason(invalid)
 
-    polys = [p for p in parts if isinstance(p, Polygon)]
-    lines = [p for p in parts if p.geom_type == "LineString"]
-    unsupported = [p for p in parts if not isinstance(p, Point | Polygon | LineString)]
-    unsupported += [p for p in parts if p.geom_type == "LinearRing"]
+    warnings: list[str] = []
+    repaired_to_nothing = False
+    if polygonal is not None and not polygonal.is_valid:
+        polys, note = _repair(polys)
+        repaired_to_nothing = not polys
+        if note:
+            warnings.append(note)
+
+    unsupported = [p for p in others if not isinstance(p, Point)]
+    unsupported += [p for p in lines if p.geom_type == "LinearRing"]
 
     area_m2 = length_m = area_crs = length_crs = None
-    unwrapped = 0
     if polys:
-        area_m2, area_crs, n = _measure_parts(polys, "laea")
-        unwrapped += n
+        area_m2, area_crs = _measure_parts(polys, "laea")
     if lines:
-        length_m, length_crs, n = _measure_parts(lines, "aeqd")
-        unwrapped += n
-    warnings: tuple[str, ...] = ()
+        length_m, length_crs = _measure_parts(lines, "aeqd")
     if unwrapped:
-        warnings = (
+        warnings.append(
             f"antimeridian: negative longitudes were shifted by +360 for {unwrapped} part(s) "
-            "that spanned more than 180 degrees of longitude",
+            "that spanned more than 180 degrees of longitude"
         )
 
     reason = None
     if area_m2 is None and length_m is None:
-        reason = "unsupported" if unsupported else "not applicable"
+        if repaired_to_nothing:
+            reason = "no polygonal area after repair"
+        else:
+            reason = "unsupported" if unsupported else "not applicable"
     return Measurement(
         area_m2=area_m2,
         length_m=length_m,
@@ -175,5 +214,5 @@ def measure(geom: BaseGeometry) -> Measurement:
         area_crs=area_crs,
         length_unit="m" if length_m is not None else None,
         length_crs=length_crs,
-        warnings=warnings,
+        warnings=tuple(warnings),
     )
