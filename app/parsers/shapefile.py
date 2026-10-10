@@ -20,12 +20,13 @@ from shapely.geometry import shape
 
 from app.config import (
     MAX_FEATURES,
+    MAX_PARTS,
     MAX_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_BYTES,
     MAX_VERTICES,
     MAX_ZIP_ENTRIES,
 )
-from app.parsers.base import Feature, ParsedFile, ParseError, UnmeasurableError, VertexBudget
+from app.parsers.base import Budget, Feature, ParsedFile, ParseError, UnmeasurableError
 
 WGS84 = CRS.from_epsg(4326)
 
@@ -33,6 +34,14 @@ ZIP_SIGNATURE = b"PK\x03\x04"
 _MEMBER_EXTENSIONS = {".shp", ".shx", ".dbf", ".prj", ".cpg"}
 _REQUIRED = ("shp", "shx", "dbf")
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+_POINT_TYPES = {
+    shapefile.POINT,
+    shapefile.POINTZ,
+    shapefile.POINTM,
+    shapefile.MULTIPOINT,
+    shapefile.MULTIPOINTZ,
+    shapefile.MULTIPOINTM,
+}
 
 
 def _is_unsafe(name: str) -> bool:
@@ -150,11 +159,16 @@ def _json_safe(value: Any) -> Any:
 
 
 def _read_features(
-    members: dict[str, bytes | None], encoding: str, max_features: int, max_vertices: int
+    members: dict[str, bytes | None],
+    encoding: str,
+    max_features: int,
+    max_vertices: int,
+    max_parts: int,
 ) -> tuple[list[Feature], list[str]]:
     features: list[Feature] = []
     warnings: list[str] = []
-    budget = VertexBudget(max_vertices)
+    budget = Budget(max_vertices, "vertices")
+    parts = Budget(max_parts, "parts")
     with shapefile.Reader(
         shp=io.BytesIO(members["shp"]),
         shx=io.BytesIO(members["shx"]),
@@ -178,6 +192,8 @@ def _read_features(
             raw_shape = reader.shape(index)
             raw_points = getattr(raw_shape, "points", ())
             budget.take(len(raw_points))
+            if raw_shape.shapeType not in _POINT_TYPES:
+                parts.take(len(getattr(raw_shape, "parts", ())))  # lines or polygon rings
             geometry = None
             if raw_shape.shapeType == shapefile.NULL:
                 warnings.append(f"feature {index}: null shape; no geometry")
@@ -220,6 +236,7 @@ def parse_shapefile_zip(
     max_entries: int = MAX_ZIP_ENTRIES,
     max_features: int = MAX_FEATURES,
     max_vertices: int = MAX_VERTICES,
+    max_parts: int = MAX_PARTS,
 ) -> ParsedFile:
     """Parse a ZIP containing one shapefile."""
     members = read_zip_members(
@@ -232,12 +249,16 @@ def parse_shapefile_zip(
     encoding = _encoding_from_cpg(members["cpg"], warnings)
     try:
         try:
-            features, read_warnings = _read_features(members, encoding, max_features, max_vertices)
+            features, read_warnings = _read_features(
+                members, encoding, max_features, max_vertices, max_parts
+            )
         except (UnicodeDecodeError, shapefile.ShapefileException) as exc:
             if encoding == "latin-1" or not _is_decode_error(exc):
                 raise
             warnings.append(f"attribute text is not valid {encoding}; decoded as latin-1")
-            features, read_warnings = _read_features(members, "latin-1", max_features, max_vertices)
+            features, read_warnings = _read_features(
+                members, "latin-1", max_features, max_vertices, max_parts
+            )
     except ParseError:
         raise
     except (

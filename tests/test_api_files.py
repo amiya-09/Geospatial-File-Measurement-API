@@ -536,3 +536,14 @@ def test_missing_file_field_message_names_the_expected_field(client, send):
 def test_other_validation_messages_are_unchanged(client):
     resp = client.get("/api/files/not-a-uuid/")
     assert resp.json()["error"]["message"].startswith("path.file_id: ")
+
+
+def test_parts_created_by_repair_count_towards_the_upload_part_limit(client, monkeypatch):
+    # A sawtooth whose teeth cross the bottom edge: one ring in the file, many parts after
+    # repair. The parser's cap counts the ring; the measured part count is checked as well.
+    monkeypatch.setattr(config, "MAX_PARTS", 5)
+    teeth = " ".join(f"{i / 10},{0.1 if i % 2 else -0.1}" for i in range(12))
+    ring = f"{teeth} 1.2,-0.05 0,-0.05 0,-0.1"
+    resp = upload(client, kml(placemark("saw", polygon_kml(ring))))
+    assert resp.status_code == 422
+    assert "more than 5 parts" in resp.json()["error"]["message"]

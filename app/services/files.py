@@ -7,6 +7,7 @@ from typing import Any, BinaryIO
 from pyproj.exceptions import ProjError
 from sqlalchemy.orm import Session
 
+from app import config
 from app.db import repository
 from app.db.models import FeatureRecord, FileRecord
 from app.errors import ApiError
@@ -81,6 +82,7 @@ def _measure_features(
     warnings = list(parsed.warnings)
     rows: list[FeatureRecord] = []
     label = crs_label(parsed.crs)
+    parts_measured = 0
     for feature in parsed.features:
         geometry = geometry_type = None
         measurement: dict[str, Any]
@@ -94,6 +96,14 @@ def _measure_features(
                 geometry = to_geojson(wgs84)
             except (MeasurementError, ProjError) as exc:
                 raise MeasurementError(f"feature {feature.index}: {exc}") from exc
+            # The parsers cap parts before building geometry; repair can add parts, so the
+            # measured total is checked too.
+            parts_measured += result.part_count
+            if parts_measured > config.MAX_PARTS:
+                raise MeasurementError(
+                    f"file has more than {config.MAX_PARTS} parts after repair "
+                    f"(reached at feature {feature.index})"
+                )
             geometry_type = feature.geometry.geom_type
             measurement = {
                 "area_m2": result.area_m2,

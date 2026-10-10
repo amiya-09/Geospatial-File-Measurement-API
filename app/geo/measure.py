@@ -8,6 +8,7 @@ import shapely
 from shapely.geometry import MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
+from app import config
 from app.geo.crs import project_local
 
 # Slack for float noise from reprojection (~0.1 m); anything beyond is not lon/lat.
@@ -31,6 +32,7 @@ class Measurement:
     length_unit: str | None = None
     length_crs: str | None = None
     warnings: tuple[str, ...] = ()
+    part_count: int = 0  # simple parts measured (each in its own projection), after any repair
 
 
 def _parts(geom: BaseGeometry) -> Iterator[BaseGeometry]:
@@ -103,24 +105,15 @@ def _measure_parts(parts: Sequence[BaseGeometry], kind: str) -> tuple[float, str
     return total, f"local +proj={kind} per part ({len(parts)} parts)"
 
 
-def _repair(polys: list[Polygon]) -> tuple[list[Polygon], str | None]:
+def _repair(polys: list[Polygon]) -> list[Polygon]:
     """Repair a feature's polygons together, as one multipolygon.
 
     The "structure" method unions overlapping polygons and subtracts holes, so a polygon
-    written twice counts once. Returns the polygonal pieces and a warning when the repaired
-    area differs from the sum of the polygons as written.
+    written twice counts once. Returns the polygonal pieces.
     """
     shape = polys[0] if len(polys) == 1 else MultiPolygon(polys)
     repaired = shapely.make_valid(shape, method="structure", keep_collapsed=False)
-    pieces = [p for p in _parts(repaired) if isinstance(p, Polygon) and not p.is_empty]
-    before = _measure_parts(polys, "laea")[0]
-    after = _measure_parts(pieces, "laea")[0] if pieces else 0.0
-    if abs(after - before) <= 1e-6 * max(abs(after), abs(before)):
-        return pieces, None
-    return pieces, (
-        f"repair changed the area: the polygons as written sum to {before:,.0f} m2, "
-        f"the repaired shape is {after:,.0f} m2"
-    )
+    return [p for p in _parts(repaired) if isinstance(p, Polygon) and not p.is_empty]
 
 
 def _check_lon_lat(geom: BaseGeometry) -> None:
@@ -178,11 +171,17 @@ def measure(geom: BaseGeometry) -> Measurement:
 
     warnings: list[str] = []
     repaired_to_nothing = False
+    written_m2: float | None = None  # area of the polygons as written, when they were repaired
     if polygonal is not None and not polygonal.is_valid:
-        polys, note = _repair(polys)
+        vertices = shapely.get_num_coordinates(polygonal)
+        if vertices > config.MAX_REPAIR_VERTICES:
+            raise MeasurementError(
+                f"polygon is invalid ({validity_reason}) and has {vertices} vertices; "
+                f"repair is limited to {config.MAX_REPAIR_VERTICES} vertices"
+            )
+        written_m2 = _measure_parts(polys, "laea")[0]
+        polys = _repair(polys)
         repaired_to_nothing = not polys
-        if note:
-            warnings.append(note)
 
     unsupported = [p for p in others if not isinstance(p, Point)]
     unsupported += [p for p in lines if p.geom_type == "LinearRing"]
@@ -190,6 +189,13 @@ def measure(geom: BaseGeometry) -> Measurement:
     area_m2 = length_m = area_crs = length_crs = None
     if polys:
         area_m2, area_crs = _measure_parts(polys, "laea")
+    if written_m2 is not None:
+        after = area_m2 or 0.0
+        if abs(after - written_m2) > 1e-6 * max(abs(after), abs(written_m2)):
+            warnings.append(
+                f"repair changed the area: the polygons as written sum to {written_m2:,.0f} m2, "
+                f"the repaired shape is {after:,.0f} m2"
+            )
     if lines:
         length_m, length_crs = _measure_parts(lines, "aeqd")
     if unwrapped:
@@ -215,4 +221,5 @@ def measure(geom: BaseGeometry) -> Measurement:
         length_unit="m" if length_m is not None else None,
         length_crs=length_crs,
         warnings=tuple(warnings),
+        part_count=len(polys) + len(lines),
     )

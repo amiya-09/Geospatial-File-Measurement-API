@@ -10,7 +10,8 @@ from pyproj import Geod
 from shapely.geometry import GeometryCollection, MultiPolygon, Point, Polygon, box
 from shapely.geometry.polygon import orient
 
-from app.geo.measure import measure
+from app import config
+from app.geo.measure import MeasurementError, measure
 
 GEOD = Geod(ellps="WGS84")
 
@@ -98,3 +99,52 @@ def test_valid_input_has_no_repair_warning():
     m = measure(MultiPolygon([box(0, 0, 1, 1), box(2, 0, 3, 1)]))
     assert m.is_valid is True
     assert not any("repair" in w for w in m.warnings)
+
+
+# ---- repair cost limit ----
+
+
+def star(n: int, r: float = 0.01) -> list[tuple[float, float]]:
+    """A star polygon whose edges cross each other about n*n/4 times: the slowest repair found."""
+    import math
+
+    m = n // 2
+    return [
+        (r * math.cos(2 * math.pi * (k * m % n) / n), r * math.sin(2 * math.pi * (k * m % n) / n))
+        for k in range(n)
+    ]
+
+
+def test_invalid_polygon_above_the_repair_limit_is_rejected(monkeypatch):
+    monkeypatch.setattr(config, "MAX_REPAIR_VERTICES", 20)
+    with pytest.raises(MeasurementError, match="repair is limited to 20 vertices"):
+        measure(Polygon(star(21)))
+
+
+def test_invalid_polygon_at_the_repair_limit_is_repaired(monkeypatch):
+    # Vertices are counted as stored, including each ring's closing vertex: 21 + 1.
+    monkeypatch.setattr(config, "MAX_REPAIR_VERTICES", 22)
+    m = measure(Polygon(star(21)))
+    assert m.is_valid is False and m.area_m2 > 0
+
+
+def test_repair_limit_counts_all_polygons_of_the_feature_together(monkeypatch):
+    monkeypatch.setattr(config, "MAX_REPAIR_VERTICES", 8)
+    overlapping = MultiPolygon([box(0, 0, 2, 2), box(1, 1, 3, 3)])  # 5 + 5 coordinates
+    with pytest.raises(MeasurementError, match="repair is limited"):
+        measure(overlapping)
+
+
+def test_valid_polygon_above_the_repair_limit_is_measured(monkeypatch):
+    monkeypatch.setattr(config, "MAX_REPAIR_VERTICES", 20)
+    circle = Point(0, 0).buffer(0.01, quad_segs=64)
+    assert circle.is_valid and len(circle.exterior.coords) > 20
+    assert measure(circle).area_m2 > 0
+
+
+def test_measurement_reports_how_many_parts_were_measured():
+    assert measure(box(0, 0, 1, 1)).part_count == 1
+    assert measure(MultiPolygon([box(0, 0, 1, 1), box(2, 0, 3, 1)])).part_count == 2
+    assert measure(Point(0, 0)).part_count == 0
+    bowtie = Polygon([(0, 0), (1, 1), (1, 0), (0, 1)])
+    assert measure(bowtie).part_count == 2  # repaired into two triangles

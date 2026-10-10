@@ -25,8 +25,8 @@ from shapely.geometry import (
 )
 from shapely.geometry.base import BaseGeometry
 
-from app.config import MAX_FEATURES, MAX_VERTICES, MAX_XML_DEPTH
-from app.parsers.base import Feature, ParsedFile, ParseError, VertexBudget
+from app.config import MAX_FEATURES, MAX_PARTS, MAX_VERTICES, MAX_XML_DEPTH
+from app.parsers.base import Budget, Feature, ParsedFile, ParseError
 
 
 class NotKmlError(ParseError):
@@ -37,6 +37,7 @@ WGS84 = CRS.from_epsg(4326)
 
 _GEOMETRY_TAGS = {"Point", "LineString", "LinearRing", "Polygon", "MultiGeometry"}
 _UNSUPPORTED_TAGS = {"Track", "MultiTrack", "Model"}
+_PART_TAGS = {"LineString", "LinearRing"}
 _COMMA_SPACES = re.compile(r"\s*,\s*")
 
 
@@ -59,7 +60,7 @@ def _text(el: Element | None) -> str | None:
     return el.text.strip() or None
 
 
-def _coordinates(el: Element, budget: VertexBudget) -> list[tuple[float, float]]:
+def _coordinates(el: Element, budget: Budget) -> list[tuple[float, float]]:
     """Parse a geometry's <coordinates>: whitespace-separated lon,lat[,alt]; altitude dropped."""
     nodes = _children(el, "coordinates")
     if not nodes:
@@ -83,14 +84,14 @@ def _coordinates(el: Element, budget: VertexBudget) -> list[tuple[float, float]]
     return points
 
 
-def _ring(boundary: Element, budget: VertexBudget) -> list[tuple[float, float]]:
+def _ring(boundary: Element, budget: Budget) -> list[tuple[float, float]]:
     rings = _children(boundary, "LinearRing")
     if not rings:
         raise _GeometryError("boundary has no <LinearRing>")
     return _coordinates(rings[0], budget)
 
 
-def _simple_geometries(el: Element, budget: VertexBudget) -> list[BaseGeometry]:
+def _simple_geometries(el: Element, budget: Budget) -> list[BaseGeometry]:
     """Geometries for one geometry element; MultiGeometry is flattened recursively."""
     kind = _local(el.tag)
     try:
@@ -112,13 +113,13 @@ def _simple_geometries(el: Element, budget: VertexBudget) -> list[BaseGeometry]:
     except (ValueError, ShapelyError) as exc:  # shapely: too few points, etc.
         raise _GeometryError(str(exc)) from exc
     if kind == "MultiGeometry":
-        parts = []
+        members = []
         for child in el:
             if _local(child.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS:
-                parts.extend(_simple_geometries(child, budget))
-        if not parts:
+                members.extend(_simple_geometries(child, budget))
+        if not members:
             raise _GeometryError("empty <MultiGeometry>")
-        return parts
+        return members
     raise _GeometryError(f"unsupported geometry <{kind}>")
 
 
@@ -136,7 +137,7 @@ def _combine(parts: list[BaseGeometry]) -> BaseGeometry:
     return GeometryCollection(parts)
 
 
-def _placemark_geometry(placemark: Element, budget: VertexBudget) -> BaseGeometry:
+def _placemark_geometry(placemark: Element, budget: Budget) -> BaseGeometry:
     elements = [c for c in placemark if _local(c.tag) in _GEOMETRY_TAGS | _UNSUPPORTED_TAGS]
     if not elements:
         raise _GeometryError("no geometry")
@@ -144,8 +145,7 @@ def _placemark_geometry(placemark: Element, budget: VertexBudget) -> BaseGeometr
     # so one with a single child returns that child's own type (Point, not MultiPoint).
     if len(elements) == 1 and _local(elements[0].tag) != "MultiGeometry":
         return _simple_geometries(elements[0], budget)[0]
-    parts = [g for el in elements for g in _simple_geometries(el, budget)]
-    return _combine(parts)
+    return _combine([g for el in elements for g in _simple_geometries(el, budget)])
 
 
 def _properties(placemark: Element) -> dict[str, str]:
@@ -202,6 +202,7 @@ def parse_kml(
     *,
     max_features: int = MAX_FEATURES,
     max_vertices: int = MAX_VERTICES,
+    max_parts: int = MAX_PARTS,
     max_depth: int = MAX_XML_DEPTH,
 ) -> ParsedFile:
     if not data.strip():
@@ -212,7 +213,8 @@ def parse_kml(
 
     features: list[Feature] = []
     warnings: list[str] = []
-    budget = VertexBudget(max_vertices)
+    budget = Budget(max_vertices, "vertices")
+    parts = Budget(max_parts, "parts")
     for el in root.iter():
         if _local(el.tag) != "Placemark":
             continue
@@ -220,6 +222,9 @@ def parse_kml(
         if index >= max_features:
             raise ParseError(f"file has more than {max_features} features")
         try:
+            # Every line and every polygon ring is a <LineString> or <LinearRing>; count them
+            # all before any geometry of this Placemark is built.
+            parts.take(sum(1 for e in el.iter() if _local(e.tag) in _PART_TAGS))
             geometry = _placemark_geometry(el, budget)
         except (_GeometryError, RecursionError) as exc:
             geometry = None
