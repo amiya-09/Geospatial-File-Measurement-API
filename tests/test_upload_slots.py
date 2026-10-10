@@ -39,6 +39,26 @@ def test_upload_when_every_slot_is_taken_is_503_server_busy_and_stores_nothing(c
     assert client.get("/api/files/").json() == []
 
 
+def test_an_upload_turned_away_is_never_read_into_memory(client, one_slot, monkeypatch):
+    # When reading came first, 24 uploads waiting for a slot took the server from 121 MB to
+    # 1.4 GB, although every one of them got a 503.
+    reads, real = [], service.read_limited
+
+    def spy(*args, **kwargs):
+        reads.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(service, "read_limited", spy)
+    one_slot.acquire()
+    try:
+        assert upload(client, SURVEY_KML).status_code == 503
+    finally:
+        one_slot.release()
+    assert reads == []
+    assert upload(client, SURVEY_KML).status_code == 201
+    assert reads == [1]
+
+
 def test_reads_do_not_need_a_slot(client, one_slot):
     fid = upload(client, SURVEY_KML).json()["id"]
     one_slot.acquire()

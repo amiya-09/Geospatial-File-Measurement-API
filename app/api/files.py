@@ -4,7 +4,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
-from app import config
 from app.db import repository
 from app.db.models import FileRecord
 from app.db.session import get_session
@@ -86,8 +85,7 @@ def _load(session: Session, file_id: uuid.UUID) -> FileRecord:
     ),
 )
 def upload_file(session: SessionDep, file: Annotated[UploadFile, File(description="zip or kml")]):
-    data = service.read_limited(file.file, config.MAX_UPLOAD_BYTES)
-    return service.create_file(session, file.filename, data)
+    return service.create_file(session, file.filename, file.file)
 
 
 @router.get(

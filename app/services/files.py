@@ -166,9 +166,14 @@ def _measure_features(
     return rows, warnings, label
 
 
-def create_file(session: Session, filename: str | None, data: bytes) -> FileRecord:
-    """Parse, measure and store an upload. Raises ApiError for every client-side failure."""
+def create_file(session: Session, filename: str | None, source: BinaryIO) -> FileRecord:
+    """Read, parse, measure and store an upload. Raises ApiError for every client-side failure.
+
+    The upload is read into memory only once a processing slot is held, so an upload that
+    waits for a slot, or is turned away, holds nothing but Starlette's spooled temp file.
+    """
     with processing_slot():
+        data = read_limited(source, config.MAX_UPLOAD_BYTES)
         try:
             fmt, parsed = parse_upload(data)
         except UnmeasurableError as exc:  # only the shapefile parser raises it (.prj problems)

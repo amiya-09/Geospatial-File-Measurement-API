@@ -1,5 +1,5 @@
 """Settings and processing limits. Parsers take limits as keyword defaults so tests can pass
-small ones; the upload route reads MAX_UPLOAD_BYTES at request time."""
+small ones; create_file reads MAX_UPLOAD_BYTES at request time."""
 
 import os
 from pathlib import Path
