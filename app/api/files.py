@@ -78,9 +78,10 @@ def _load(session: Session, file_id: uuid.UUID) -> FileRecord:
         ),
         (
             503,
-            "Database busy under heavy load; retry after the Retry-After seconds",
-            "database_busy",
-            "The database is busy; retry shortly",
+            "Busy: too many uploads in progress (server_busy) or the database is busy "
+            "(database_busy). Nothing was stored; retry after the Retry-After seconds",
+            "server_busy",
+            "The server is busy processing other uploads; retry shortly",
         ),
     ),
 )

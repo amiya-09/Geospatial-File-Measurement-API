@@ -1,7 +1,10 @@
 """Upload handling: read safely, pick the parser by content, measure, persist."""
 
 import logging
+import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, BinaryIO
 
 from pyproj.exceptions import ProjError
@@ -10,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import config
 from app.db import repository
 from app.db.models import FeatureRecord, FileRecord
-from app.errors import ApiError
+from app.errors import RETRY_AFTER_SECONDS, ApiError
 from app.geo.crs import crs_label, to_wgs84
 from app.geo.measure import MeasurementError, measure
 from app.parsers.base import ParsedFile, ParseError, UnmeasurableError
@@ -23,6 +26,24 @@ logger = logging.getLogger("app")
 CHUNK_SIZE = 64 * 1024
 MAX_FILENAME = 255
 COMPLETED, FAILED = "COMPLETED", "FAILED"
+
+processing_slots = threading.BoundedSemaphore(config.MAX_CONCURRENT_UPLOADS)
+
+
+@contextmanager
+def processing_slot() -> Iterator[None]:
+    """Hold one of the few upload processing slots, or raise 503 after a short wait."""
+    if not processing_slots.acquire(timeout=config.UPLOAD_SLOT_WAIT_SECONDS):
+        raise ApiError(
+            503,
+            "server_busy",
+            "The server is busy processing other uploads; retry shortly",
+            headers={"Retry-After": RETRY_AFTER_SECONDS},
+        )
+    try:
+        yield
+    finally:
+        processing_slots.release()
 
 
 def read_limited(source: BinaryIO, limit: int, chunk_size: int = CHUNK_SIZE) -> bytes:
@@ -136,16 +157,17 @@ def _measure_features(
 
 def create_file(session: Session, filename: str | None, data: bytes) -> FileRecord:
     """Parse, measure and store an upload. Raises ApiError for every client-side failure."""
-    try:
-        fmt, parsed = parse_upload(data)
-    except UnmeasurableError as exc:  # raised by parsers; format is known from the signature
-        fmt = "shapefile" if data.startswith(ZIP_SIGNATURE) else "kml"
-        raise _fail(session, filename, fmt, None, exc) from exc
-    file_id = str(uuid.uuid4())
-    try:
-        rows, warnings, label = _measure_features(parsed, file_id)
-    except MeasurementError as exc:
-        raise _fail(session, filename, fmt, crs_label(parsed.crs), exc, file_id) from exc
+    with processing_slot():
+        try:
+            fmt, parsed = parse_upload(data)
+        except UnmeasurableError as exc:  # raised by parsers; format is known from the signature
+            fmt = "shapefile" if data.startswith(ZIP_SIGNATURE) else "kml"
+            raise _fail(session, filename, fmt, None, exc) from exc
+        file_id = str(uuid.uuid4())
+        try:
+            rows, warnings, label = _measure_features(parsed, file_id)
+        except MeasurementError as exc:
+            raise _fail(session, filename, fmt, crs_label(parsed.crs), exc, file_id) from exc
     record = FileRecord(
         id=file_id,
         filename=clean_filename(filename),

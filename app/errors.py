@@ -28,11 +28,19 @@ class ErrorResponse(BaseModel):
 
 
 class ApiError(Exception):
-    def __init__(self, status_code: int, code: str, message: str, **extra: Any) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+        **extra: Any,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers = headers
         self.extra = extra
 
 
@@ -55,7 +63,11 @@ def _describe(err: dict[str, Any]) -> str:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def api_error(_: Request, exc: ApiError) -> JSONResponse:
-        return JSONResponse(_body(exc.code, exc.message, **exc.extra), status_code=exc.status_code)
+        return JSONResponse(
+            _body(exc.code, exc.message, **exc.extra),
+            status_code=exc.status_code,
+            headers=exc.headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:

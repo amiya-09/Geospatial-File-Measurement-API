@@ -19,3 +19,8 @@ MAX_PARTS = 20_000
 # Read at call time so tests can lower it.
 MAX_REPAIR_VERTICES = 350
 MAX_XML_DEPTH = 50
+# Parsing and measuring are CPU bound and hold the decompressed upload in memory, so only this
+# many uploads are processed at once. Another upload waits up to UPLOAD_SLOT_WAIT_SECONDS for
+# a slot, then gets 503 server_busy. The wait is read at call time so tests can lower it.
+MAX_CONCURRENT_UPLOADS = 4
+UPLOAD_SLOT_WAIT_SECONDS = 2
