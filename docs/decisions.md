@@ -2,7 +2,7 @@
 
 Each entry says what I chose, why, what I rejected and where it breaks. Where my first version
 was wrong, the entry says what went wrong and what changed. The numbers come from the tests, the
-stage reports and `docs/accuracy.md`.
+reports written at each stage of the build and `docs/accuracy.md`.
 
 ## Area: a local equal-area projection per part
 
@@ -192,9 +192,9 @@ the finished result. There is no background queue, so the stored status is only 
 `COMPLETED` or `FAILED`. The `PROCESSING` status from `plan.md` never appears. The plan's reason
 was that the files are small and synchronous code is simpler to test.
 
-What went wrong first showed up under load. In Stage E, 60 uploads of 1,500 polygons each were
+What went wrong first showed up under load. In a load test, 60 uploads of 1,500 polygons each were
 sent at once, and some failed with a 500 because the SQLite write lock was busy. WAL mode and a
-30 s busy timeout still left 19 of the 60 as 500s. In the next phase, a locked database and an
+30 s busy timeout still left 19 of the 60 as 500s. Next, a locked database and an
 exhausted connection pool became 503 `database_busy` with `Retry-After: 2`: 36 uploads returned
 201, 24 returned 503 and none returned 500. The security review then showed this was still poor.
 A client waited 30 s only to be told to retry in 2 s. With 45 uploads waiting, `/health` took
@@ -225,7 +225,7 @@ decompressed members, and the geometries).
 
 ## Antimeridian
 
-Stage A found the problem. A feature written with wrapped longitudes (179, then -179) was read as
+The problem showed up while building the measurement core. A feature written with wrapped longitudes (179, then -179) was read as
 358 degrees wide. A 2 degree box came out about 3,700 times too large, and a line from 179 to
 -179 along the equator measured 39,852 km instead of 222 km. Both came back with
 `is_valid: true` and no warning. I could have rejected such features. I chose to unwrap them.
