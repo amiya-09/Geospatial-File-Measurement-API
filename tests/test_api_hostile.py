@@ -54,6 +54,14 @@ def test_zip_just_over_100_mb_uncompressed_is_400(client, parts):
     assert resp.status_code == 400 and "uncompressed" in resp.json()["error"]["message"]
 
 
+def test_dbf_over_25_mb_is_400_and_stores_nothing(client, parts):
+    zipped = shapefile_zip({**parts, "dbf": parts["dbf"] + b" " * config.MAX_DBF_BYTES})
+    assert len(zipped) < 1_000_000  # compresses to almost nothing
+    resp = upload(client, zipped)
+    assert resp.status_code == 400 and ".dbf is larger than" in resp.json()["error"]["message"]
+    assert client.get("/api/files/").json() == []
+
+
 def test_encrypted_and_multi_shapefile_zips_are_400(client, parts):
     from tests.fixtures import mark_entries_encrypted
 

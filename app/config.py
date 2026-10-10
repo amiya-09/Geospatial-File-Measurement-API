@@ -8,6 +8,9 @@ DATABASE_PATH = Path(os.environ.get("GEO_API_DB", "geo_api.db"))
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_ZIP_ENTRIES = 100
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+# The .dbf (attribute table) alone: an upload stores no more attribute text than a KML upload
+# could carry. Without it a 199 KB ZIP holding a 100 MB .dbf stored 118 MB in the database.
+MAX_DBF_BYTES = MAX_UPLOAD_BYTES
 MAX_FEATURES = 10_000
 MAX_VERTICES = 1_000_000
 # Lines and polygon rings per upload (points do not count). Each part is projected on its own,

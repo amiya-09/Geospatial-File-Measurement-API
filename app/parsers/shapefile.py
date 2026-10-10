@@ -20,6 +20,7 @@ from shapely.errors import ShapelyError
 from shapely.geometry import shape
 
 from app.config import (
+    MAX_DBF_BYTES,
     MAX_FEATURES,
     MAX_PARTS,
     MAX_UNCOMPRESSED_BYTES,
@@ -74,6 +75,7 @@ def read_zip_members(
     max_compressed: int = MAX_UPLOAD_BYTES,
     max_uncompressed: int = MAX_UNCOMPRESSED_BYTES,
     max_entries: int = MAX_ZIP_ENTRIES,
+    max_dbf: int = MAX_DBF_BYTES,
 ) -> dict[str, bytes | None]:
     """Validate a Shapefile ZIP and return its shp/shx/dbf (and optional prj/cpg) bytes.
 
@@ -123,11 +125,17 @@ def read_zip_members(
                 raise ParseError(f"shapefile is missing its .{ext} file")
 
         budget = max_uncompressed
+        dbf_too_large = f".dbf is larger than {max_dbf} bytes"
         result: dict[str, bytes | None] = {"prj": None, "cpg": None}
         for ext, info in members.items():
+            limit = budget
+            if ext == "dbf":
+                if info.file_size > max_dbf:
+                    raise ParseError(dbf_too_large)
+                limit = min(budget, max_dbf)
             try:
                 with archive.open(info) as handle:
-                    blob = handle.read(budget + 1)
+                    blob = handle.read(limit + 1)
             except (
                 RuntimeError,
                 NotImplementedError,
@@ -137,6 +145,8 @@ def read_zip_members(
                 ValueError,  # e.g. a corrupt header offset (negative seek)
             ) as exc:
                 raise ParseError(f"could not read {info.filename!r} from ZIP: {exc}") from exc
+            if ext == "dbf" and len(blob) > max_dbf:
+                raise ParseError(dbf_too_large)
             budget -= len(blob)
             if budget < 0:
                 raise ParseError(f"ZIP uncompressed size exceeds the {max_uncompressed} byte limit")
@@ -274,6 +284,7 @@ def parse_shapefile_zip(
     max_compressed: int = MAX_UPLOAD_BYTES,
     max_uncompressed: int = MAX_UNCOMPRESSED_BYTES,
     max_entries: int = MAX_ZIP_ENTRIES,
+    max_dbf: int = MAX_DBF_BYTES,
     max_features: int = MAX_FEATURES,
     max_vertices: int = MAX_VERTICES,
     max_parts: int = MAX_PARTS,
@@ -284,6 +295,7 @@ def parse_shapefile_zip(
         max_compressed=max_compressed,
         max_uncompressed=max_uncompressed,
         max_entries=max_entries,
+        max_dbf=max_dbf,
     )
     warnings: list[str] = []
     encoding = _encoding_from_cpg(members["cpg"], warnings)

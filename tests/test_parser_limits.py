@@ -6,6 +6,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from app.config import (
+    MAX_DBF_BYTES,
     MAX_FEATURES,
     MAX_PARTS,
     MAX_REPAIR_VERTICES,
@@ -29,6 +30,7 @@ def test_default_limits():
     assert MAX_REPAIR_VERTICES == 350
     assert MAX_UNCOMPRESSED_BYTES == 100 * 1024 * 1024
     assert MAX_XML_ELEMENTS == 500_000
+    assert MAX_DBF_BYTES == 25 * 1024 * 1024
 
 
 def test_budget_counts_cumulatively_and_allows_exactly_the_limit():

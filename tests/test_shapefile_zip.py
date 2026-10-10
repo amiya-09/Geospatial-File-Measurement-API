@@ -196,6 +196,37 @@ def test_zip_bound_is_enforced_on_bytes_actually_read_not_on_the_header(parts, m
     assert requested and all(0 < n <= cap + 1 for n in requested)
 
 
+def test_dbf_over_its_own_cap_is_rejected(parts):
+    # A 199 KB ZIP holding a 100 MB .dbf of attribute text stored 118 MB in the database.
+    padded = {**parts, "dbf": parts["dbf"] + b" " * 1_000}
+    limit = len(padded["dbf"])
+    assert read_zip_members(shapefile_zip(padded), max_dbf=limit)["dbf"] == padded["dbf"]
+    with pytest.raises(ParseError, match=rf"\.dbf is larger than {limit - 1} bytes"):
+        read_zip_members(shapefile_zip(padded), max_dbf=limit - 1)
+
+
+def test_dbf_cap_is_enforced_on_bytes_actually_read_not_on_the_header(parts, monkeypatch):
+    zipped = shapefile_zip(parts)
+    requested = []
+
+    class Endless(io.BytesIO):
+        def read(self, size=-1):
+            requested.append(size)
+            return super().read(size)
+
+    real_open = zipfile.ZipFile.open
+
+    def fake_open(self, info, *args, **kwargs):
+        if info.filename.endswith(".dbf"):
+            return Endless(b" " * 50_000)
+        return real_open(self, info, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", fake_open)
+    with pytest.raises(ParseError, match=r"\.dbf is larger than 1000 bytes"):
+        read_zip_members(zipped, max_dbf=1_000)
+    assert requested == [1_001]
+
+
 def test_mixed_case_folder_names_still_group_one_shapefile(parts):
     zipped = make_zip(
         {
