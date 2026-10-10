@@ -74,6 +74,12 @@ def _load(session: Session, file_id: uuid.UUID) -> FileRecord:
             "unmeasurable_file",
             "no .prj file and coordinates are not longitude/latitude",
         ),
+        (
+            503,
+            "Database busy under heavy load; retry after the Retry-After seconds",
+            "database_busy",
+            "The database is busy; retry shortly",
+        ),
     ),
 )
 def upload_file(session: SessionDep, file: Annotated[UploadFile, File(description="zip or kml")]):

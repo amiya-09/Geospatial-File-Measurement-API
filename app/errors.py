@@ -7,10 +7,13 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger("app")
 
+RETRY_AFTER_SECONDS = "2"
 _HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
 
 
@@ -64,6 +67,27 @@ def install_error_handlers(app: FastAPI) -> None:
     async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _HTTP_CODES.get(exc.status_code, "http_error")
         return JSONResponse(_body(code, str(exc.detail)), status_code=exc.status_code)
+
+    # SQLite allows one writer at a time. Under heavy load a request can wait too long for the
+    # write lock or for a free pooled connection. That is the server being busy, not a bug, so
+    # say "try again" rather than 500.
+    def database_busy(reason: str) -> JSONResponse:
+        logger.warning("database busy: %s", reason)
+        return JSONResponse(
+            _body("database_busy", "The database is busy; retry shortly"),
+            status_code=503,
+            headers={"Retry-After": RETRY_AFTER_SECONDS},
+        )
+
+    @app.exception_handler(OperationalError)
+    async def database_error(request: Request, exc: OperationalError) -> JSONResponse:
+        if "database is locked" in str(exc.orig):
+            return database_busy("database is locked")
+        return await unexpected_error(request, exc)
+
+    @app.exception_handler(PoolTimeoutError)
+    async def pool_timeout(_: Request, exc: PoolTimeoutError) -> JSONResponse:
+        return database_busy("no free connection in the pool")
 
     @app.exception_handler(Exception)
     async def unexpected_error(_: Request, exc: Exception) -> JSONResponse:

@@ -31,7 +31,7 @@ def test_every_spec_endpoint_has_a_summary_and_an_example_response():
 def test_documented_error_responses_use_the_error_body_shape():
     spec = app.openapi()
     post = spec["paths"]["/api/files/"]["post"]["responses"]
-    assert {"201", "400", "413", "415", "422"} <= set(post)
+    assert {"201", "400", "413", "415", "422", "503"} <= set(post)
     measurements = spec["paths"]["/api/files/{file_id}/measurements/"]["get"]["responses"]
     assert {"200", "404", "409"} <= set(measurements)
     for status in ("400", "413", "415"):
