@@ -6,7 +6,7 @@ from pyproj import CRS
 
 from app.parsers.base import ParseError, UnmeasurableError
 from app.parsers.shapefile import parse_shapefile_zip
-from tests.fixtures import make_zip, shapefile_parts, shapefile_zip
+from tests.fixtures import make_zip, mark_dbf_records_deleted, shapefile_parts, shapefile_zip
 
 WGS84_PRJ = CRS.from_epsg(4326).to_wkt()
 WGS84_ESRI_PRJ = CRS.from_epsg(4326).to_wkt(version="WKT1_ESRI")
@@ -290,3 +290,36 @@ def test_shp_and_dbf_record_count_mismatch_is_rejected_not_silently_truncated(
     mismatched = {"shp": shp_side["shp"], "shx": shp_side["shx"], "dbf": dbf_side["dbf"]}
     with pytest.raises(ParseError, match="records"):
         parse(mismatched)
+
+
+# ---- DBF records flagged deleted ----
+
+
+def numbered_points(n):
+    def build(w):
+        for i in range(n):
+            w.point(i, i)
+            w.record(f"r{i}")
+
+    return shapefile_parts(build, shapefile.POINT)
+
+
+@pytest.mark.parametrize("deleted", [(1,), (0,), (2,), (0, 2), (1, 2)])
+def test_deleted_dbf_records_are_skipped_and_the_rest_stay_aligned(deleted):
+    parts = numbered_points(3)
+    parts["dbf"] = mark_dbf_records_deleted(parts["dbf"], *deleted)
+    parsed = parse(parts)
+    kept = [i for i in range(3) if i not in deleted]
+    # index is the record's position in the file, so indexes keep their gaps
+    assert [f.index for f in parsed.features] == kept
+    assert [f.properties["name"] for f in parsed.features] == [f"r{i}" for i in kept]
+    assert [f.geometry.x for f in parsed.features] == [float(i) for i in kept]
+    for i in deleted:
+        assert any(f"feature {i}" in w and "deleted" in w for w in parsed.warnings)
+
+
+def test_shx_whose_header_promises_more_shapes_than_its_body_holds_is_rejected():
+    parts = numbered_points(4)
+    parts["shx"] = parts["shx"][:100]  # header still declares 4 records; body is gone
+    with pytest.raises(ParseError):
+        parse(parts)

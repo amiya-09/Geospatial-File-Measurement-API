@@ -67,3 +67,13 @@ def forge_uncompressed_size(zip_bytes: bytes, declared: int) -> bytes:
             data[pos + offset : pos + offset + 4] = declared.to_bytes(4, "little")
             pos = data.find(signature, pos + 4)
     return bytes(data)
+
+
+def mark_dbf_records_deleted(dbf: bytes, *indexes: int) -> bytes:
+    """Flag DBF records as deleted ('*' in each record's first byte)."""
+    data = bytearray(dbf)
+    header_len = int.from_bytes(data[8:10], "little")
+    record_len = int.from_bytes(data[10:12], "little")
+    for index in indexes:
+        data[header_len + index * record_len] = ord("*")
+    return bytes(data)

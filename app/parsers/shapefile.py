@@ -168,22 +168,27 @@ def _read_features(
             )
         if len(reader) > max_features:
             raise ParseError(f"file has more than {max_features} features")
-        for index, shape_record in enumerate(reader.iterShapeRecords()):
-            if index >= max_features:  # the header count can lie
-                raise ParseError(f"file has more than {max_features} features")
-            raw_points = getattr(shape_record.shape, "points", ())
+        # Read by position, not with iterShapeRecords(): that skips records flagged deleted in
+        # the .dbf without skipping the matching shape, which pairs shapes with the wrong rows.
+        for index in range(reader.numShapes):
+            record = reader.record(index)
+            if record is None:  # pyshp returns None for a record flagged deleted
+                warnings.append(f"feature {index}: record is flagged deleted in the .dbf; skipped")
+                continue
+            raw_shape = reader.shape(index)
+            raw_points = getattr(raw_shape, "points", ())
             budget.take(len(raw_points))
             geometry = None
-            if shape_record.shape.shapeType == shapefile.NULL:
+            if raw_shape.shapeType == shapefile.NULL:
                 warnings.append(f"feature {index}: null shape; no geometry")
             elif not all(math.isfinite(c) for point in raw_points for c in point):
                 warnings.append(f"feature {index}: non-finite (NaN/inf) coordinate; no geometry")
             else:
                 try:
-                    geometry = shape(shape_record.shape.__geo_interface__)
+                    geometry = shape(raw_shape.__geo_interface__)
                 except (shapefile.GeoJSON_Error, ShapelyError, ValueError) as exc:
                     warnings.append(f"feature {index}: geometry could not be read ({exc})")
-            properties = {k: _json_safe(v) for k, v in shape_record.record.as_dict().items()}
+            properties = {k: _json_safe(v) for k, v in record.as_dict().items()}
             features.append(Feature(index, None, geometry, properties))
     return features, warnings
 
@@ -243,6 +248,7 @@ def parse_shapefile_zip(
         KeyError,
         EOFError,
         OverflowError,
+        AssertionError,  # pyshp asserts on an .shx that disagrees with its own header
     ) as exc:
         raise ParseError(f"could not read the shapefile: {exc}") from exc
     warnings += read_warnings
