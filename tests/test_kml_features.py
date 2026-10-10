@@ -101,6 +101,18 @@ def test_multigeometry_with_mixed_types_becomes_a_geometry_collection():
     assert {g.geom_type for g in feature.geometry.geoms} == {"Point", "LineString"}
 
 
+def test_multigeometry_of_lines_skips_non_geometry_children():
+    mg = (
+        "<MultiGeometry><name>not a geometry</name>"
+        "<LineString><coordinates>0,0 1,0</coordinates></LineString>"
+        "<LineString><coordinates>2,0 3,0</coordinates></LineString></MultiGeometry>"
+    )
+    feature, parsed = one(placemark(mg))
+    assert feature.geometry.geom_type == "MultiLineString"
+    assert len(feature.geometry.geoms) == 2
+    assert parsed.warnings == []
+
+
 def test_nested_multigeometry_is_flattened():
     mg = (
         "<MultiGeometry><MultiGeometry><Point><coordinates>1,1</coordinates></Point>"
@@ -187,6 +199,9 @@ def test_placemark_without_geometry_is_kept_with_a_warning():
         "</LinearRing></outerBoundaryIs></Polygon>",
         "<Polygon></Polygon>",
         "<MultiGeometry></MultiGeometry>",
+        "<Point></Point>",
+        "<Point><coordinates>1,1 2,2</coordinates></Point>",
+        "<Polygon><outerBoundaryIs></outerBoundaryIs></Polygon>",
     ],
 )
 def test_malformed_geometry_keeps_the_feature_with_no_geometry_and_a_warning(geometry):
