@@ -42,3 +42,15 @@ def test_documented_error_responses_use_the_error_body_shape():
 def test_the_openapi_document_is_served(client):
     resp = client.get("/openapi.json")
     assert resp.status_code == 200 and "/api/files/" in resp.json()["paths"]
+
+
+def test_the_measurements_example_is_what_the_api_really_returns():
+    from shapely.geometry import shape
+
+    from app.geo.measure import measure
+    from app.schemas import MeasurementsResponse
+
+    (feature,) = MeasurementsResponse.model_config["json_schema_extra"]["example"]["features"]
+    real = measure(shape(feature["geometry"]))
+    assert feature["measurement"]["area_m2"] == round(real.area_m2, 2)
+    assert feature["measurement"]["area_crs"] == real.area_crs

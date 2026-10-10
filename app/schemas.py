@@ -52,7 +52,11 @@ class MeasurementOut(BaseModel):
     area_m2: float | None = None
     length_m: float | None = None
     area_unit: str | None = None
-    area_crs: str | None = Field(None, description="Local projected CRS (PROJ string) used")
+    area_crs: str | None = Field(
+        None,
+        description="Local projected CRS used: its PROJ string, or a short summary when each "
+        "part of a multi-part geometry was projected on its own",
+    )
     length_unit: str | None = None
     length_crs: str | None = None
     reason: str | None = Field(None, description="Why nothing was measured, if so")
@@ -95,11 +99,11 @@ class MeasurementsResponse(BaseModel):
                         "crs": "EPSG:4326",
                         "properties": {"name": "parcel"},
                         "measurement": {
-                            "area_m2": 12308778361.47,
+                            "area_m2": 12308309698.66,
                             "length_m": None,
                             "area_unit": "m2",
-                            "area_crs": "+proj=laea +lat_0=0.5 +lon_0=0.5 +x_0=0 +y_0=0 "
-                            "+ellps=WGS84 +units=m +no_defs +type=crs",
+                            "area_crs": "+proj=laea +lat_0=0.5 +lon_0=0.5 +datum=WGS84 "
+                            "+units=m +no_defs +type=crs",
                             "length_unit": None,
                             "length_crs": None,
                             "reason": None,
