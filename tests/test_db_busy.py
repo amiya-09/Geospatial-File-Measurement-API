@@ -11,7 +11,7 @@ from tests.api_helpers import SURVEY_KML, upload
 
 @pytest.fixture
 def locked_db(engine, client):
-    """Another connection holds the write lock; ours give up after 100 ms instead of 30 s."""
+    """Another connection holds the write lock; ours give up after 100 ms instead of 5 s."""
 
     @event.listens_for(engine, "connect")
     def short_timeout(dbapi_connection, _record):
@@ -28,7 +28,7 @@ def locked_db(engine, client):
 def test_upload_while_database_is_locked_is_503_with_retry_after(client, locked_db):
     resp = upload(client, SURVEY_KML)
     assert resp.status_code == 503
-    assert resp.headers["retry-after"] == "2"
+    assert resp.headers["retry-after"] == "5"
     err = resp.json()["error"]
     assert err["code"] == "database_busy"
     assert set(resp.json()) == {"error"}
@@ -64,5 +64,5 @@ def exhausted_pool_client(tmp_path):
 def test_upload_when_no_database_connection_is_free_is_503(exhausted_pool_client):
     resp = upload(exhausted_pool_client, SURVEY_KML)
     assert resp.status_code == 503
-    assert resp.headers["retry-after"] == "2"
+    assert resp.headers["retry-after"] == "5"
     assert resp.json()["error"]["code"] == "database_busy"

@@ -11,9 +11,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.db.session import BUSY_TIMEOUT_MS
+
 logger = logging.getLogger("app")
 
-RETRY_AFTER_SECONDS = "2"
+RETRY_AFTER_SECONDS = str(BUSY_TIMEOUT_MS // 1000)
 _HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
 
 

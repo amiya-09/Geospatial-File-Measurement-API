@@ -130,8 +130,13 @@ def test_list_files_newest_first_with_paging(session_factory):
         assert [f.id for f in repository.list_files(session, limit=2, offset=2)] == ids[::-1][2:]
 
 
-def test_connections_use_wal_and_a_long_busy_timeout(engine):
+def test_connections_use_wal_and_a_5_second_busy_timeout(engine):
+    # Long enough for normal write queues, short enough that a client hears "retry" quickly.
     with engine.connect() as conn:
         assert conn.execute(text("PRAGMA journal_mode")).scalar() == "wal"
-        assert conn.execute(text("PRAGMA busy_timeout")).scalar() >= 30_000
+        assert conn.execute(text("PRAGMA busy_timeout")).scalar() == 5_000
         assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 1
+
+
+def test_waiting_for_a_pooled_connection_gives_up_after_5_seconds_too(engine):
+    assert engine.pool.timeout() == 5

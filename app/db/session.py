@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from app import config
 from app.db.models import Base
 
-BUSY_TIMEOUT_MS = 30_000
+# How long a request waits for the SQLite write lock, or for a pooled connection, before the
+# client gets 503 database_busy. Retry-After uses the same number of seconds.
+BUSY_TIMEOUT_MS = 5_000
 
 
 def _strict_json(value: object) -> str:
@@ -22,6 +24,7 @@ def make_engine(path: Path | str) -> Engine:
     engine = create_engine(
         f"sqlite:///{path}",
         connect_args={"check_same_thread": False, "timeout": BUSY_TIMEOUT_MS / 1000},
+        pool_timeout=BUSY_TIMEOUT_MS / 1000,
         json_serializer=_strict_json,
     )
 
