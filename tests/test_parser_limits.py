@@ -1,5 +1,9 @@
+import tracemalloc
+
 import pytest
 import shapefile
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from app.config import (
     MAX_FEATURES,
@@ -65,6 +69,27 @@ def test_kml_vertex_cap_is_cumulative_across_features():
 def test_kml_vertex_cap_applies_to_a_single_large_geometry():
     with pytest.raises(ParseError, match="vertices"):
         parse_kml(kml(line_placemark(50)), max_vertices=10)
+
+
+def test_kml_vertex_cap_is_checked_before_the_coordinates_are_split():
+    # Splitting a 25 MB <coordinates> text into 6.5 million tokens took 452 MB before the limit
+    # could reject it. Here 0.8 MB of tokens took 13 MB at peak.
+    data = kml(line_placemark(0).replace("</coordinates>", "1,1 " * 200_000 + "</coordinates>"))
+    tracemalloc.start()
+    try:
+        with pytest.raises(ParseError, match="more than 10 vertices"):
+            parse_kml(data, max_vertices=10)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 4 * len(data)
+
+
+@settings(max_examples=500, deadline=None)
+@given(st.text(alphabet="12,. \t\n\u00a0\u3000x", max_size=40), st.integers(0, 12))
+def test_kml_tokens_are_counted_as_the_coordinate_parser_splits_them(text, stop_after):
+    tokens = kml_module._COMMA_SPACES.sub(",", text).split()
+    assert kml_module._count_tokens(text, stop_after) == min(len(tokens), stop_after + 1)
 
 
 def test_kml_limits_are_enforced_before_any_shapely_geometry_is_built(monkeypatch):

@@ -39,6 +39,7 @@ _GEOMETRY_TAGS = {"Point", "LineString", "LinearRing", "Polygon", "MultiGeometry
 _UNSUPPORTED_TAGS = {"Track", "MultiTrack", "Model"}
 _PART_TAGS = {"LineString", "LinearRing"}
 _COMMA_SPACES = re.compile(r"\s*,\s*")
+_PIECE = re.compile(r"\S+")
 
 
 class _GeometryError(ValueError):
@@ -60,13 +61,33 @@ def _text(el: Element | None) -> str | None:
     return el.text.strip() or None
 
 
+def _count_tokens(text: str, stop_after: int) -> int:
+    """Number of coordinate tokens in ``text``, counting no further than ``stop_after + 1``.
+
+    The tokens are those of ``_COMMA_SPACES.sub(",", text).split()``: whitespace next to a comma
+    does not separate. They are found one at a time and nothing is kept for each.
+    """
+    count, joins_next = 0, False
+    for match in _PIECE.finditer(text):
+        start, end = match.span()
+        if count == 0 or not (joins_next or text[start] == ","):
+            count += 1
+            if count > stop_after:
+                break
+        joins_next = text[end - 1] == ","
+    return count
+
+
 def _coordinates(el: Element, budget: Budget) -> list[tuple[float, float]]:
     """Parse a geometry's <coordinates>: whitespace-separated lon,lat[,alt]; altitude dropped."""
     nodes = _children(el, "coordinates")
     if not nodes:
         raise _GeometryError("missing <coordinates>")
-    tokens = _COMMA_SPACES.sub(",", nodes[0].text or "").split()
-    budget.take(len(tokens))  # counted from the raw text, before any float or geometry is built
+    text = nodes[0].text or ""
+    # Counted before splitting (splitting 6.5 million tokens first took 452 MB), and before any
+    # float or geometry is built.
+    budget.take(_count_tokens(text, stop_after=budget.limit - budget.used))
+    tokens = _COMMA_SPACES.sub(",", text).split()
     points = []
     for token in tokens:
         parts = token.split(",")
