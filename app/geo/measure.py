@@ -1,6 +1,6 @@
 """Area and length of WGS84 geometries, computed in local projected CRSs (metres)."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -87,7 +87,7 @@ def _unwrap_antimeridian(part: BaseGeometry) -> tuple[BaseGeometry, bool]:
     return part, False
 
 
-def _measure_parts(parts: list[BaseGeometry], kind: str) -> tuple[float, str, int]:
+def _measure_parts(parts: Sequence[BaseGeometry], kind: str) -> tuple[float, str, int]:
     """Sum the measure of each part, each in its own local projection.
 
     Returns (total, crs label, number of parts unwrapped across the antimeridian). Parts are
@@ -155,7 +155,7 @@ def measure(geom: BaseGeometry) -> Measurement:
     if lines:
         length_m, length_crs, n = _measure_parts(lines, "aeqd")
         unwrapped += n
-    warnings = ()
+    warnings: tuple[str, ...] = ()
     if unwrapped:
         warnings = (
             f"antimeridian: negative longitudes were shifted by +360 for {unwrapped} part(s) "

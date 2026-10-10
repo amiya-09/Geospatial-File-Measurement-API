@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from pyproj.exceptions import ProjError
 from sqlalchemy.orm import Session
@@ -83,6 +83,7 @@ def _measure_features(
     label = crs_label(parsed.crs)
     for feature in parsed.features:
         geometry = geometry_type = None
+        measurement: dict[str, Any]
         if feature.geometry is None:
             measurement = {"reason": "no geometry"}
             is_valid, validity_reason, feature_warnings = True, None, []
