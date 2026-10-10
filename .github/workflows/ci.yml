@@ -17,8 +17,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: pyproject.toml
-      - run: pip install -e ".[dev]"
+          cache-dependency-path: requirements.lock
+      - run: pip install -r requirements.lock
+      - run: pip install -e . --no-deps
       - run: ruff check app tests scripts
       - run: ruff format --check app tests scripts
       - run: pytest

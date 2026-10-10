@@ -12,15 +12,19 @@ or pyogrio.
 ## Setup
 
 Requires Python 3.11 or newer (the test suite passes on 3.11, 3.12 and 3.13). No system
-libraries are needed: every dependency installs from a pip wheel. Dependency versions are not
-pinned; the latest releases are installed.
+libraries are needed: every dependency installs from a pip wheel. `requirements.lock` pins the
+exact versions the test suite passed with, so install from it:
 
 ```bash
 git clone <repository-url> geo-measure-api && cd geo-measure-api
 python -m venv .venv      # use python3 if `python` is not on your PATH
 . .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements.lock
+pip install -e . --no-deps
 ```
+
+`pyproject.toml` keeps loose version bounds. `pip install -e ".[dev]"` instead of the two pip
+lines above installs the latest releases. The lock was generated and tested on Linux only.
 
 ## Running
 
