@@ -70,7 +70,7 @@ All paths end with a trailing slash and are never redirected. Every error uses o
 ### Upload
 
 ```bash
-curl -F file=@samples/sample.kml http://127.0.0.1:8000/api/files/
+curl -F "file=@samples/sample.kml" http://127.0.0.1:8000/api/files/
 ```
 
 ```json
@@ -171,7 +171,7 @@ curl "http://127.0.0.1:8000/api/files/?limit=2"
 | 500 | `internal_error` | Anything unexpected. Generic body; the traceback is only logged. |
 
 ```bash
-curl -F file=@samples/bad_no_prj.zip http://127.0.0.1:8000/api/files/    # 422
+curl -F "file=@samples/bad_no_prj.zip" http://127.0.0.1:8000/api/files/    # 422
 ```
 
 ```json
@@ -179,7 +179,7 @@ curl -F file=@samples/bad_no_prj.zip http://127.0.0.1:8000/api/files/    # 422
 ```
 
 ```bash
-curl -F file=@samples/bad_not_a_map.kml http://127.0.0.1:8000/api/files/   # 415
+curl -F "file=@samples/bad_not_a_map.kml" http://127.0.0.1:8000/api/files/   # 415
 ```
 
 ```json

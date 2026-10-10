@@ -25,13 +25,16 @@ This matrix was checked against the original assignment document on 2026-10-10.
 | M11 | NOTE | The 25 MB cap is enforced on bytes read (and by the body middleware), but Starlette spools the multipart body to a temp file before the handler runs, so a request up to cap + 64 KiB is written to disk first. |
 | M12 | NOTE | `created_at` is returned only by the list endpoint (`GET /api/files/`), not by the file-info endpoint, because the info shape is fixed by the assignment example and Stage C. |
 
-No mismatch was found in field names, status codes or response shapes against the assignment's
-own examples (see "Field names" below).
+The assignment has one example response (file information). It was compared with the live API
+on 2026-10-10: all five fields are present, and the API adds three (`format`, `warnings`,
+`error`). The assignment defines no status codes and no measurements response shape; those are
+listed under "Not defined by the spec, our choices" below.
 
 ## Assignment requirements
 
 | Req | Requirement | Implemented in | Covered by | Status |
 |---|---|---|---|---|
+| Intro | Production quality Python code, a clean backend API | `pyproject.toml` (ruff settings), `.github/workflows/ci.yml`, one error body shape in `app/errors.py`, upload limits in `app/config.py` | `ruff check`, `ruff format --check` and `pytest` ran clean on 2026-10-10 | NOTE: the spec gives no measurable criterion, so this row records evidence, not a pass mark |
 | 1 | Use FastAPI | `app/main.py` `create_app` | `tests/test_health.py` | OK |
 | 2 | `POST /api/files/` accepts a `.zip` containing a Shapefile | `app/api/files.py` `upload_file`; `app/services/files.py` `parse_upload`; `app/parsers/shapefile.py` `parse_shapefile_zip` | `test_api_files.py::test_zipped_shapefile_in_utm_is_reprojected_to_wgs84_in_the_response`; `test_shapefile_zip.py`; `test_shapefile_parse.py` | OK |
 | 2 | ... accepts a `.kml` | `parse_upload` -> `app/parsers/kml.py` `parse_kml` | `test_api_files.py::test_kml_upload_then_info_then_measurements`; `test_kml_features.py`; `test_kml_content.py` | OK |
@@ -58,11 +61,31 @@ own examples (see "Field names" below).
 | 6 | Paths exactly as in the spec, no 307 redirects | `FastAPI(redirect_slashes=False)` | `test_api_files.py::test_exact_spec_paths_never_redirect`, `::test_paths_without_the_trailing_slash_are_404_not_a_redirect` | OK |
 | 6 | Unknown id / bad input produce clear errors | `app/errors.py` (one body shape) | `test_api_errors.py`; `test_api_files.py` 404/409/415/413/422 tests | OK |
 | 7 | README: Setup | `README.md` "Setup", "Running" | fresh-clone check (below) | OK |
-| 7 | README: API with example requests/responses | `README.md` "API reference" (real captured output) | `scripts/smoke.sh` | OK |
+| 7 | README: API with example requests/responses | `README.md` "API reference" (real captured output) | `scripts/smoke.sh` | NOTE: upload, measurements, list and error responses are shown. For file details the README gives the curl command and says it returns the same object as the upload, with no separate response block (checked by reading the README on 2026-10-10) |
 | 7 | README: Architecture (structure, file flow, measurement flow, CRS handling) | `README.md` "Project structure", "File-processing flow", "Measurement flow", "CRS handling summary" | n/a (documentation) | OK |
 | 7 | README: Design decisions and alternatives | placeholder in `README.md`; `docs/decisions.md` skeleton | n/a | GAP (M2) |
 | 8 | README mentions learnings and future scope | placeholders in `README.md` | n/a | GAP (M2) |
 | 8 | Public GitHub repo | none | n/a | GAP (M1) |
+| 8 | Share the repo link | n/a | n/a | Yours to do (see below) |
+
+## Not defined by the spec, our choices
+
+The assignment does not define the items below. Each is our own choice. The last column says what
+was actually checked, on 2026-10-10 unless stated.
+
+| Item | What the spec says | What we do | What was checked |
+|---|---|---|---|
+| POST response body | "Uploads and processes a file." No response example. | 201 with the file information object | For `samples/sample.kml` the POST body equals the GET file details body |
+| Measurements response shape | "Returns measurements for the features in the file." No list or wrapper, no field names. `feature_count` appears only in the file information example. | An object `{file_id, crs, total, limit, offset, features}` | Live keys listed; the wrapper has no `feature_count` and the file details endpoint keeps it |
+| Multipart field name | Not named. | The upload must be the form field `file` | A field named `upload` returns 422. Since commit `a4e6944` the message names the expected field (`tests/test_api_files.py::test_missing_file_field_message_names_the_expected_field`) |
+| Status codes | None defined. | See "Status codes" below | n/a |
+
+## Yours to do
+
+- Share the public repo link (assignment section 8: "Create a public github repo and share the
+  link"). This cannot be done from here.
+- Create the public repo (M1) and write the README sections for design decisions, learnings and
+  future scope (M2).
 
 ## Field names
 
@@ -83,6 +106,8 @@ own examples (see "Field names" below).
 | Measurement | `area_m2`, `length_m`, unit and CRS used (plan.md) | `area_m2`, `length_m`, `area_unit`, `length_unit`, `area_crs`, `length_crs`, `reason` | yes (M4) |
 
 ## Status codes
+
+The assignment defines no status codes. This table is our own design.
 
 | Situation | Status | `error.code` | Test |
 |---|---|---|---|
